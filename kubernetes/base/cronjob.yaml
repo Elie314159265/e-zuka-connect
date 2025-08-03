@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weather-fetch-cronjob
+  namespace: your-gcp-project-id
+spec:
+  # JST 01:00 (UTC 16:00) に毎日実行
+  schedule: "0 16 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: weather-fetcher
+            image: curlimages/curl:8.14.1
+            args:
+            - -X
+            - POST
+            - http://core-api/api/weather/fetch-and-store
+          restartPolicy: OnFailure

@@ -1,0 +1,123 @@
+件名：フロントエンド更新のデプロイ作業 - 2025/07/11 進捗サマリー
+
+**現在の進捗:**
+
+1.  `frontend/src/pages/index.tsx` の更新内容を反映させるため、Dockerイメージのビルドを行いました。
+2.  ビルド時に発生した複数のTypeScriptエラー（依存関係不足、型定義エラー）をすべて修正し、コードは正常にビルドできる状態になりました。
+3.  `your-gcp-project-id-frontend:latest` という名前で、新しいフロントエンドのDockerイメージのビルドに成功しました。
+4.  Kubernetesへのデプロイを試みましたが、GKEクラスタへの認証エラーで失敗している状態です。
+
+**ポイント:**
+
+*   フロントエンドのソースコードは、ローカルでのビルドが成功する状態になっています。
+*   デプロイが止まっている原因は、`gcloud` の認証情報が切れていることです。
+*   このプロジェクトでは、コンテナイメージをGoogle Artifact Registry (`asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:TAG`) で管理しています。
+
+**次に始めること:**
+
+1.  **認証の更新:**
+    *   ターミナルで `gcloud auth login` を実行して、Google Cloudに再ログインしてください。
+
+2.  **デプロイの再実行:**
+    *   認証が完了したら、デプロイを再開します。
+    *   **注意:** 現在、`frontend-deployment.yaml` はローカルのDockerイメージ (`your-gcp-project-id-frontend:latest`) を参照するように変更されています。本来の運用に戻すには、ビルドしたイメージにGoogle Artifact Registry用の正しいタグを付けてプッシュし、マニフェストファイルを再度更新する必要があります。
+    *   まずは認証後に `./scripts/deploy.sh` を再実行して、ローカルイメージで反映されるか確認するのが最初のステップになります。
+
+---
+**2025/07/12 フロントエンドの構造リファクタリングとデバッグ**
+
+**実施内容:**
+
+1.  **問題点の特定:**
+    *   `frontend/src/pages/index.tsx`に全コンポーネントとページロジ�����クが混在し、Next.jsのApp Routerの規約から外れていたため、プレビューでレイアウト崩れやアニメーションの不具合が発生していた。
+
+2.  **構造リファクタリング:**
+    *   **ディレクトリ作成:** Next.jsのApp Router規約に沿って`frontend/src/app`および`frontend/src/components`ディレクトリを作成。
+    *   **グローバルレイアウト設定:** `app/layout.tsx`と`app/globals.css`を作成し、アプリケーション全体の基本レイアウトとTailwind CSSのスタイルを適用。
+    *   **コンポーネント分割:** `Header`, `Footer`, `AiAdviceModal`などの再利用可能なUI部品を`components`ディレクトリに個別のファイルとして分離。
+    *   **ページ移行:** `index.tsx`内にあった各ページ（ホームページ、ログイン、新規登録、利用規約など）を、`app/`ディレクトリ以下の適切なパス（例: `app/page.tsx`, `app/login/page.tsx`）にそれぞれ移行。
+    *   **クリーンアップ:** 不要になった古い`pages`ディレクトリを完全に削除。
+
+3.  **依存関係の修正:**
+    *   開発サーバー起動時に`autoprefixer`モジュールが見つからないエラーが発生したため、`npm install -D autoprefixer`を実行して依存関係を解決。
+
+**結果:**
+
+*   フロントエンドのプロジェクト構造がNext.jsのベストプラクティスに沿った形に整理され、メンテナンス性と可読性が大幅に向上した。
+*   `npm run dev`による開発サーバーが正常に起動し、当初の問題であったレイアウト崩れやアニメーションの不具合が解消されたことを確認。
+*   フロントエンドのデバッグが完了し、コアサービスの開発に着手できる状態となった。
+
+---
+**2025/07/12 Core APIのデプロイデバッグと問題解決の記録**
+
+**サマリー:**
+`core-api`にユーザー認証機能を追加し、Kubernetesにデプロイする過程で、`CrashLoopBackOff`エラーが頻発。約10回以上のデプロイ失敗を経て、複数の根本原因を特定・解決し、最終的に正常起動とAPIの動作確認に成功した。
+
+**発生した問題と解決策の時系列:**
+
+1.  **問題: `CreateContainerConfigError`**
+    *   **原因:** `kustomization.yaml`に`configmap.yaml`が含まれていなかった。
+    *   **解決策:** `kustomization.yaml`に`configmap.yaml`を追加。
+
+2.  **問題: `CrashLoopBackOff` (ImportError)**
+    *   **原因:** Uvicornの起動方法が原因で、`app`ディレクトリがPythonのパッケージとして認識されていなかった。
+    *   **解決策:** プロジェクト構造をFastAPIの公式ドキュメントに沿って再構築し、Dockerfileの`CMD`命令を修正。
+
+3.  **問題: `CrashLoopBackOff` (TypeError)**
+    *   **原因:** Python 3.9の環境で、3.10以降の型ヒント構文(`str | None`)を使用していた。
+    *   **解決策:** `from typing import Optional` をインポートし、`Optional[str]`に修正。
+
+4.  **問題: `CrashLoopBackOff` (Cloud SQL Admin APIの無効化)**
+    *   **原因:** `cloud-sql-proxy`が必要とする`Cloud SQL Admin API`がGCPプロジェクトで有効になっていなかった。
+    *   **解決策:** `gcloud services enable sqladmin.googleapis.com`でAPIを有効化。
+
+5.  **問題: `CrashLoopBackOff` (Cloud SQLインスタンスの不存在)**
+    *   **原因:** 接続しようとしていたCloud SQLインスタンス`your-gcp-project-id-db`が存在しなかった。
+    *   **解決策:** `gcloud sql instances create`でインスタンスを作成。
+
+6.  **問題: `CrashLoopBackOff` (DBのパスワード認証失敗)**
+    *   **原因:** アプリケーションが使おうとしていたDBユーザー`user`が存在しなかった。
+    *   **解決策:** `gcloud sql databases create`と`gcloud sql users create`でDBとユーザーを作成。
+
+**最終的な重要な学び:**
+
+*   **ログは両方見る:** Podで複数のコンテナが動いている場合、関連する全てのコンテナのログを確認することが不可欠。
+*   **インフラの前提を疑う:** コードだけでなく、接続先のインフラリソース（インスタンス、API、IAM権限）が正しく存在・設定されているかを最初に確認すべき。
+*   **エラーメッセージは正確に読む:** `connection refused`と`password authentication failed`は全く違うエラー。エラーメッセージの些細な違いが、問題の所在を特定する鍵となる�����
+*   **段階的な切り分け:** 問題が複雑な場合は、`kubectl exec`でPod内部からテストするなど、内側から外側へ段階的に問題の範囲を狭めていくアプローチが有効。
+
+---
+**2025/07/12 フロントエンド・API連携の最終デバッグ記録**
+
+**サマリー:**
+`core-api`が正常起動した後も、フロントエンドからのAPI呼び出しで`502 Bad Gateway`や`CORS`エラーが頻発。GKE Ingressのヘルスチェック、Next.jsの環境変数、FastAPIのCORS設定とルーティングという、3つのレイヤーにまたがる設定の不整合が原因だった。
+
+**発生した問題と解決策の時系列:**
+
+1.  **問題: `502 Bad Gateway`**
+    *   **原因:** GKE Ingressのデフォルトヘルスチェックパス(`/`)に対し、FastAPIが`404`を返していたため、IngressがPodを不健康と判断していた。
+    *   **解決策:** `BackendConfig`リソースを作成してIngressのヘルスチェックパスをFastAPIが応答する`/api`に変更し、Serviceのポートに`name`を付けてアノテーションで関連付けた。
+
+2.  **問題: `undefined/api/users` へのリクエスト (404エラー)**
+    *   **原因:** `frontend-deployment.yaml`で設定した環境変数が`NEXT_PUBLIC_`で始まっていなかったため、Next.jsのビルド時にクライアントサイドのコードに埋め込まれず`undefined`になっていた。
+    *   **解決策:** Dockerfileを修正し、`npm run build`時に`ARG`と`ENV`を使ってビルド時環境変数をコードに埋め込むようにした。
+
+3.  **問題: CORS `No 'Access-Control-Allow-Origin' header`**
+    *   **原因:** `http://your-gcp-project-id.com`からのリクエストが、FastAPIのCORSミドルウェアで許可されていなかった。また、`OPTIONS`メソッド（プリフライトリクエスト）への応答が正しく設定されていなかった。
+    *   **解決策:** `main.py`の`CORSMiddleware`の設定で、許可するオリジンに`http://...`を追加し、すべてのメソッドとヘッダーを許可するように修正。
+
+4.  **問題: `404 Not Found` (末尾スラッシュの不一致)**
+    *   **���因:** フロントエンドからのリクエストパス(`/api/users/`)と、FastAPIルーターで定義されたパス(`/api/users`)が、末尾のスラッシュの有無で完全に一致していなかった。
+    *   **解決策:** 最終的に、FastAPI側のルーティング定義とフロントエンドからのリクエストURLを、すべて末尾スラッシュ有りの形に統一することで解決。
+
+5.  **問題: Mixed Content (HTTP/HTTPSの混在)**
+    *   **原因:** HTTPSのページから、`http://`で始まるAPIを呼び出そうとしていたため、ブラウザにブロックされていた。これは、Dockerfileでのビルド時環境変数の値が`http://`になっていたことが最終的な原因だった。
+    *   **解決策:** Dockerfileの`ARG NEXT_PUBLIC_API_BASE_URL`のデフォルト値を`https://your-gcp-project-id.com`に修正し、ビルド時にHTTPSのURLが埋め込まれるようにした。
+
+**最終的な重要な学び:**
+
+*   **Next.jsの環境変数:** クライアントサイドで使いたい環境変数は、必ず`NEXT_PUBLIC_`で始め、**ビルド時に**正しい値が渡される必要���あることを理解する。
+*   **GKE Ingressのヘルスチェック:** Ingressが`502`を返す場合、Podのヘルスチェック失敗を第一に疑う。`BackendConfig`を使い、アプリケーションが`200 OK`を返すパスにヘルスチェックパスを明示的に設定することが重要。
+*   **CORSのプリフライト:** CORSエラーが出た場合、`GET`や`POST`だけでなく、ブラウザが自動的に送信する`OPTIONS`メソッド（プリフライトリクエスト）にサーバーが正しく応答できているかを確認する。
+*   **パスの厳密な一致:** ルーティングに関わるすべてのレイヤー（フロントエンドのコード、Ingress、バックエンドフレームワーク）で、パスの定義（特に末尾のスラッシュ）が完全に一致している必要がある。
+*   **Mixed Content:** HTTPSページからは、必ずHTTPSのAPIを呼び出す。ビルド時に埋め込まれるURLのプロトコルまで確認することが重要。

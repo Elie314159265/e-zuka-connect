@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-processor
+  namespace: your-gcp-project-id
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ocr-processor
+  template:
+    metadata:
+      labels:
+        app: ocr-processor
+    spec:
+      containers:
+      - name: ocr-processor
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ocr-processor:v1.2.0-gamification-20250718-032320
+        ports:
+        - containerPort: 80
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /app/gcp-credentials.json
+        volumeMounts:
+        - name: gcp-credentials-volume
+          mountPath: /app
+          readOnly: true
+      volumes:
+      - name: gcp-credentials-volume
+        secret:
+          secretName: gcp-ocr-credentials

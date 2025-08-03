@@ -1,0 +1,15 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/contact/page": "app/contact/page.js",
+  "/line-integration/page": "app/line-integration/page.js",
+  "/login/owner/page": "app/login/owner/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/mypage/page": "app/mypage/page.js",
+  "/login/user/page": "app/login/user/page.js",
+  "/receipt/upload/page": "app/receipt/upload/page.js",
+  "/register/owner/page": "app/register/owner/page.js",
+  "/register/user/page": "app/register/user/page.js",
+  "/page": "app/page.js",
+  "/privacy/page": "app/privacy/page.js",
+  "/terms/page": "app/terms/page.js"
+}

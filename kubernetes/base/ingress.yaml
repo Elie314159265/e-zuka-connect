@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: your-gcp-project-id-ingress
+  namespace: your-gcp-project-id
+  annotations:
+    networking.gke.io/v1beta1.FrontendConfig: "http-to-https-redirect"
+    kubernetes.io/ingress.global-static-ip-name: "iizuka-connect-static-ip"
+    networking.gke.io/managed-certificates: "your-gcp-project-id-certificate"
+    kubernetes.io/ingress.allow-http: "true"
+spec:
+  rules:
+  - host: your-gcp-project-id.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: core-api
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80

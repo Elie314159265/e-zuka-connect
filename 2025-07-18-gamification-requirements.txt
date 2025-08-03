@@ -1,0 +1,726 @@
+# E-Zuka Connect ゲーミフィケーション機能実用化要件定義書
+
+## 作成日: 2025-07-18
+## 目的: 現在Mockデータとなっているゲーミフィケーション機能を実際に運用可能なシステムに拡張
+
+---
+
+## 1. 現状分析と課題
+
+### 1.1 実装済み基盤
+✅ **データベースモデル**: GamificationProfile, Badge, UserBadge, PointTransaction
+✅ **基本API**: プロファイル取得、バッジ表示、手動ポイント操作
+✅ **フロントエンド表示**: マイページでのポイント・バッジ表示（Mockデータ）
+
+### 1.2 重要な実装不足
+❌ **自動ポイント付与**: レシートアップロード時の自動処理
+❌ **バッジ判定ロジック**: 自動バッジ授与システム
+❌ **特典交換機能**: 実際のクーポン生成・管理
+❌ **コミュニティ目標**: 集合的な目標管理
+❌ **フロントエンド連携**: 実際のAPIデータ取得
+
+---
+
+## 2. ポイント獲得システム要件
+
+### 2.1 ポイント獲得ルール設計
+
+#### 2.1.1 基本獲得ルール
+```yaml
+レシートアップロード:
+  基本ポイント: 10pt
+  条件:
+    - OCR解析成功
+    - 重複レシートでない
+    - アップロード日時から24時間以内のレシート
+
+購入金額ボーナス:
+  100円以上: +5pt
+  500円以上: +10pt
+  1000円以上: +20pt
+  3000円以上: +50pt
+
+連続利用ボーナス:
+  3日連続: +20pt
+  7日連続: +50pt
+  30日連続: +100pt
+
+初回ボーナス:
+  初回登録: +100pt
+  初回レシートアップロード: +50pt
+  初回特典交換: +30pt
+```
+
+#### 2.1.2 天候・時間帯ボーナス
+```yaml
+天候ボーナス:
+  雨の日アップロード: +15pt
+  雪の日アップロード: +25pt
+  
+時間帯ボーナス:
+  早朝(6-9時): +10pt
+  夜間(18-21時): +5pt
+  
+曜日ボーナス:
+  土日祝日: +5pt
+```
+
+#### 2.1.3 店舗連携ボーナス
+```yaml
+店舗タイプボーナス:
+  個人経営店舗: +15pt
+  商店街加盟店: +10pt
+  協賛イベント参加店: +20pt
+
+特定商品カテゴリ:
+  地産地消商品: +10pt
+  エコ商品: +15pt
+  限定商品: +25pt
+```
+
+### 2.2 ポイント自動付与システム実装要件
+
+#### 2.2.1 トリガーポイント
+```python
+# レシートアップロード時の自動処理フロー
+1. レシートOCR処理完了時
+2. レシート情報のDB保存完了時
+3. ポイント計算エンジン実行
+4. ポイント付与とトランザクション記録
+5. バッジ判定ロジック実行
+6. ユーザー通知送信
+```
+
+#### 2.2.2 ポイント計算エンジン要件
+```python
+class PointCalculationEngine:
+    def calculate_points(self, receipt_data, user_profile, upload_context):
+        """
+        必要な計算要素:
+        - receipt_data: レシート内容（金額、店舗、商品）
+        - user_profile: ユーザー情報（連続利用記録、過去実績）
+        - upload_context: アップロード状況（時刻、天候、位置情報）
+        
+        戻り値:
+        - base_points: 基本ポイント
+        - bonus_points: ボーナスポイント
+        - bonus_details: ボーナス詳細（表示用）
+        """
+```
+
+#### 2.2.3 重複防止機能
+```python
+class DuplicateReceiptDetection:
+    def is_duplicate(self, receipt_data, user_id):
+        """
+        重複判定条件:
+        - 同一店舗、同一金額、同一日時（±30分）
+        - 同一レシート番号（存在する場合）
+        - 画像類似度（将来実装）
+        """
+```
+
+---
+
+## 3. バッジシステム自動判定要件
+
+### 3.1 バッジカテゴリ設計
+
+#### 3.1.1 基本アクティビティバッジ
+```yaml
+初心者バッジ:
+  "はじめの一歩":
+    条件: 初回レシートアップロード
+    アイコン: "award"
+    説明: "最初のレシートをアップロードしました"
+
+継続バッジ:
+  "3日坊主卒業":
+    条件: 3日連続アップロード
+  "一週間チャレンジャー":
+    条件: 7日連続アップロード
+  "継続は力なり":
+    条件: 30日連続アップロード
+
+累積バッジ:
+  "レシート10枚達成":
+    条件: total_receipts >= 10
+  "レシート50枚達成":
+    条件: total_receipts >= 50
+  "レシート100枚達成":
+    条件: total_receipts >= 100
+```
+
+#### 3.1.2 ライフスタイルバッジ
+```yaml
+グルメバッジ:
+  "甘党":
+    条件: カテゴリ「スイーツ」のレシート >= 5
+  "お肉大好き":
+    条件: カテゴリ「精肉」のレシート >= 10
+  "野菜ソムリエ":
+    条件: カテゴリ「野菜」のレシート >= 15
+
+時間帯バッジ:
+  "早起きバード":
+    条件: 朝6-9時のアップロード >= 10回
+  "夜型人間":
+    条件: 夜22-24時のアップロード >= 10回
+
+天候バッジ:
+  "雨ニモマケズ":
+    条件: 雨の日のアップロード >= 5回
+  "雪ダルマ":
+    条件: 雪の日のアップロード >= 3回
+```
+
+#### 3.1.3 コミュニティ貢献バッジ
+```yaml
+地域貢献バッジ:
+  "商店街サポーター":
+    条件: 異なる商店街店舗でのお買い物 >= 5店
+  "個人商店応援団":
+    条件: 個人経営店でのお買い物 >= 10回
+  "地産地消推進者":
+    条件: 地元産品の購入金額 >= 10,000円
+
+特別バッジ:
+  "イベント参加者":
+    条件: イベント期間中の特定行動完了
+  "月間MVP":
+    条件: 月間ポイント獲得ランキング上位3位
+```
+
+### 3.2 バッジ判定エンジン実装要件
+
+#### 3.2.1 自動判定システム
+```python
+class BadgeEvaluationEngine:
+    def evaluate_badges(self, user_id, trigger_event):
+        """
+        バッジ判定トリガー:
+        - レシートアップロード完了時
+        - 日次バッチ処理時
+        - 特定イベント発生時
+        
+        判定プロセス:
+        1. ユーザーの全活動データ取得
+        2. 未獲得バッジの条件評価
+        3. 新規獲得バッジの特定
+        4. バッジ授与処理
+        5. 通知送信
+        """
+```
+
+#### 3.2.2 条件評価エンジン
+```python
+class BadgeCriteriaEvaluator:
+    def evaluate_criteria(self, badge_criteria, user_data):
+        """
+        criteria JSON例:
+        {
+            "type": "receipt_count",
+            "condition": ">=",
+            "value": 10,
+            "timeframe": "all_time"
+        }
+        
+        {
+            "type": "consecutive_days",
+            "condition": ">=", 
+            "value": 7
+        }
+        
+        {
+            "type": "category_purchase",
+            "category": "sweets",
+            "condition": ">=",
+            "value": 5
+        }
+        """
+```
+
+---
+
+## 4. 特典・クーポン交換システム要件
+
+### 4.1 特典管理システム
+
+#### 4.1.1 特典カテゴリ設計
+```yaml
+店舗クーポン:
+  "100円割引券":
+    必要ポイント: 500pt
+    有効期限: 30日
+    利用制限: 1回
+    対象店舗: 全加盟店
+
+  "商品プレゼント券":
+    必要ポイント: 800pt
+    有効期限: 14日
+    利用制限: 1回
+    対象商品: 特定商品
+
+デジタル特典:
+  "レア情報アクセス権":
+    必要ポイント: 1200pt
+    内容: 限定レシピ、イベント先行情報
+
+  "店主との交流会参加権":
+    必要ポイント: 2000pt
+    定員制限: あり
+    予約システム連携: 必要
+
+限定特典:
+  "シークレット特典":
+    必要ポイント: 1500pt
+    内容: 時期により変動
+    発表タイミング: 月1回
+```
+
+#### 4.1.2 特典データモデル要件
+```sql
+-- 新規テーブル: rewards
+CREATE TABLE rewards (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR NOT NULL,
+    description TEXT,
+    required_points INTEGER NOT NULL,
+    reward_type VARCHAR NOT NULL, -- 'coupon', 'gift', 'experience', 'digital'
+    store_id INTEGER REFERENCES stores(id), -- NULL = 全店共通
+    stock_quantity INTEGER, -- NULL = 無制限
+    available_stock INTEGER,
+    is_active BOOLEAN DEFAULT TRUE,
+    is_featured BOOLEAN DEFAULT FALSE,
+    valid_days INTEGER DEFAULT 30, -- クーポン有効日数
+    terms_conditions TEXT,
+    image_url VARCHAR,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP -- 特典自体の期限
+);
+
+-- 新規テーブル: user_rewards（交換履歴）
+CREATE TABLE user_rewards (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    reward_id INTEGER REFERENCES rewards(id),
+    coupon_code VARCHAR UNIQUE, -- 生成されたクーポンコード
+    redeemed_points INTEGER NOT NULL,
+    status VARCHAR DEFAULT 'active', -- 'active', 'used', 'expired'
+    expires_at TIMESTAMP, -- 個別クーポンの期限
+    used_at TIMESTAMP,
+    used_store_id INTEGER REFERENCES stores(id),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### 4.2 クーポン生成・管理システム
+
+#### 4.2.1 クーポンコード生成要件
+```python
+class CouponGenerator:
+    def generate_coupon_code(self, reward_id, user_id):
+        """
+        クーポンコード生成規則:
+        - フォーマット: EZ-{REWARD_TYPE}-{6桁ランダム}
+        - 例: EZ-DISC-A3K9M2, EZ-GIFT-P7H4N8
+        - 重複チェック必須
+        - QRコード生成対応
+        """
+```
+
+#### 4.2.2 特典交換API実装要件
+```python
+@router.post("/api/gamification/redeem")
+def redeem_reward(
+    reward_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    特典交換処理:
+    1. ユーザーのポイント残高確認
+    2. 特典の在庫確認
+    3. ポイント消費処理
+    4. クーポンコード生成
+    5. 特典交換記録作成
+    6. 在庫数更新
+    7. 通知送信
+    """
+```
+
+### 4.3 事業者向け特典管理機能
+
+#### 4.3.1 店舗オーナー向け特典作成機能
+```python
+@router.post("/api/stores/dashboard/rewards")
+def create_store_reward(
+    reward: RewardCreate,
+    current_owner: StoreOwner = Depends(get_current_store_owner)
+):
+    """
+    店舗独自特典作成:
+    - 店舗オーナーが独自特典を作成可能
+    - 承認制（管理者チェック）
+    - ポイント設定範囲制限
+    """
+```
+
+#### 4.3.2 クーポン利用確認機能
+```python
+@router.post("/api/stores/dashboard/verify-coupon")
+def verify_coupon(
+    coupon_code: str,
+    current_owner: StoreOwner = Depends(get_current_store_owner)
+):
+    """
+    クーポン利用時の確認:
+    - QRコード読み取り対応
+    - 有効性確認
+    - 利用記録更新
+    """
+```
+
+---
+
+## 5. コミュニティ目標機能要件
+
+### 5.1 コミュニティ目標システム設計
+
+#### 5.1.1 目標タイプ設計
+```yaml
+週間目標:
+  "みんなで1000枚チャレンジ":
+    期間: 1週間
+    目標: コミュニティ全体で1000枚のレシートアップロード
+    報酬: 全員に50pt + 特別バッジ
+
+月間目標:
+  "商店街制覇チャレンジ":
+    期間: 1ヶ月
+    目標: 商店街の80%以上の店舗でお買い物
+    報酬: 参加者全員にレア特典アクセス権
+
+季節イベント:
+  "夏祭り応援キャンペーン":
+    期間: 特定期間
+    目標: イベント期間中の参加店舗売上目標達成
+    報酬: コミュニティセール開催
+```
+
+#### 5.1.2 コミュニティ目標データモデル
+```sql
+-- 新規テーブル: community_goals
+CREATE TABLE community_goals (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR NOT NULL,
+    description TEXT,
+    goal_type VARCHAR NOT NULL, -- 'receipt_count', 'store_coverage', 'sales_amount'
+    target_value INTEGER NOT NULL,
+    current_value INTEGER DEFAULT 0,
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP NOT NULL,
+    status VARCHAR DEFAULT 'active', -- 'active', 'completed', 'failed', 'expired'
+    reward_description TEXT,
+    reward_points INTEGER,
+    reward_badge_id INTEGER REFERENCES badges(id),
+    participant_count INTEGER DEFAULT 0,
+    is_featured BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 新規テーブル: community_goal_participants
+CREATE TABLE community_goal_participants (
+    id SERIAL PRIMARY KEY,
+    goal_id INTEGER REFERENCES community_goals(id),
+    user_id INTEGER REFERENCES users(id),
+    contribution_value INTEGER DEFAULT 0,
+    joined_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(goal_id, user_id)
+);
+```
+
+### 5.2 目標進捗管理システム
+
+#### 5.2.1 進捗更新エンジン
+```python
+class CommunityGoalTracker:
+    def update_goal_progress(self, user_action, user_id):
+        """
+        進捗更新トリガー:
+        - レシートアップロード時
+        - 新店舗での購入時
+        - 特定金額以上の購入時
+        
+        更新プロセス:
+        1. アクティブな目標取得
+        2. ユーザー貢献度計算
+        3. 目標進捗更新
+        4. 達成判定
+        5. 報酬配布（達成時）
+        """
+```
+
+#### 5.2.2 目標達成報酬システム
+```python
+class CommunityRewardDistributor:
+    def distribute_community_rewards(self, goal_id):
+        """
+        目標達成時の報酬配布:
+        1. 参加者全員にポイント付与
+        2. 特別バッジ授与
+        3. 限定特典アクセス権付与
+        4. 成果発表・通知送信
+        """
+```
+
+---
+
+## 6. 管理者向けゲーミフィケーション管理機能要件
+
+### 6.1 管理ダッシュボード要件
+
+#### 6.1.1 ゲーミフィケーション統計機能
+```yaml
+ユーザー統計:
+  - アクティブユーザー数（日/週/月）
+  - 平均ポイント獲得数
+  - バッジ獲得分布
+  - 特典交換率
+
+エンゲージメント分析:
+  - レシートアップロード頻度
+  - 連続利用日数分布
+  - 離脱率分析
+  - 復帰率分析
+
+特典効果分析:
+  - 特典別交換数
+  - 特典コスト分析
+  - ROI計算
+  - 在庫回転率
+```
+
+#### 6.1.2 設定管理機能
+```yaml
+ポイントルール管理:
+  - 基本ポイント設定
+  - ボーナス条件設定
+  - 期間限定倍率設定
+
+バッジ管理:
+  - バッジ作成・編集
+  - 条件設定
+  - 一括授与機能
+  - 統計確認
+
+特典管理:
+  - 特典作成・編集
+  - 在庫管理
+  - 利用状況確認
+  - 緊急停止機能
+```
+
+### 6.2 運用支援機能
+
+#### 6.2.1 異常検知システム
+```python
+class GamificationAnomalyDetector:
+    def detect_anomalies(self):
+        """
+        異常パターン検知:
+        - 短時間での大量ポイント獲得
+        - 不正な重複レシート
+        - 異常なバッジ獲得パターン
+        - 特典交換の偏り
+        """
+```
+
+#### 6.2.2 A/Bテスト機能
+```python
+class GamificationABTesting:
+    def setup_experiment(self, experiment_config):
+        """
+        A/Bテスト機能:
+        - ポイント倍率のテスト
+        - バッジ条件のテスト
+        - 特典価格のテスト
+        - UI表示のテスト
+        """
+```
+
+---
+
+## 7. フロントエンド実装要件
+
+### 7.1 マイページ機能拡張
+
+#### 7.1.1 リアルタイムデータ表示
+```typescript
+// 実装が必要な機能
+- APIからの実際のポイント・バッジデータ取得
+- ポイント獲得時のアニメーション
+- バッジ獲得時の演出
+- 特典交換機能
+- 進捗バー表示（次のレベル、バッジまで）
+```
+
+#### 7.1.2 通知システム
+```typescript
+// 通知が必要なタイミング
+- ポイント獲得時
+- バッジ獲得時
+- 特典交換完了時
+- コミュニティ目標達成時
+- 限定特典公開時
+```
+
+### 7.2 新規画面要件
+
+#### 7.2.1 特典ショップ画面
+```yaml
+必要な機能:
+  - 特典一覧表示
+  - カテゴリフィルター
+  - ポイント残高表示
+  - 交換確認ダイアログ
+  - 交換履歴表示
+  - クーポンQRコード表示
+```
+
+#### 7.2.2 コミュニティ画面
+```yaml
+必要な機能:
+  - アクティブな目標表示
+  - 進捗状況可視化
+  - 参加者数表示
+  - 個人貢献度表示
+  - 過去の達成履歴
+```
+
+---
+
+## 8. 実装優先度とロードマップ
+
+### 8.1 Phase 1（最優先 - 1-2週間）
+```yaml
+必須機能:
+  1. レシートアップロード時の自動ポイント付与
+  2. マイページでの実際のAPIデータ表示
+  3. 基本的なバッジ自動判定（レシート数ベース）
+  4. 簡単な特典交換機能
+
+技術的実装:
+  - PointCalculationEngine基本版
+  - BadgeEvaluationEngine基本版
+  - フロントエンドAPI連携
+```
+
+### 8.2 Phase 2（重要 - 3-4週間）
+```yaml
+拡張機能:
+  1. 高度なバッジ判定システム
+  2. 完全な特典交換システム
+  3. 店舗オーナー向け特典管理
+  4. 基本的な管理者ダッシュボード
+
+技術的実装:
+  - 条件評価エンジン拡張
+  - クーポン生成システム
+  - 事業者向けAPI
+```
+
+### 8.3 Phase 3（改善 - 5-8週間）
+```yaml
+高度な機能:
+  1. コミュニティ目標システム
+  2. 高度な分析・統計機能
+  3. A/Bテスト機能
+  4. 異常検知システム
+
+技術的実装:
+  - コミュニティ目標エンジン
+  - 分析ダッシュボード
+  - 運用支援ツール
+```
+
+---
+
+## 9. 技術的考慮事項
+
+### 9.1 パフォーマンス要件
+```yaml
+レスポンス時間:
+  - ポイント計算: 500ms以内
+  - バッジ判定: 1秒以内
+  - 特典交換: 2秒以内
+
+スケーラビリティ:
+  - 同時ユーザー数: 1000人
+  - 日次レシート処理: 10000件
+  - ピーク時負荷対応
+```
+
+### 9.2 セキュリティ要件
+```yaml
+不正防止:
+  - レシート重複検知
+  - ポイント不正獲得防止
+  - クーポン偽造防止
+  - APIレート制限
+
+データ保護:
+  - 個人情報暗号化
+  - アクセスログ記録
+  - 権限管理
+```
+
+### 9.3 運用要件
+```yaml
+監視:
+  - システム稼働率99.9%
+  - エラー率1%未満
+  - レスポンス時間監視
+
+バックアップ:
+  - 日次フルバックアップ
+  - リアルタイム同期
+  - 災害復旧計画
+```
+
+---
+
+## 10. 成功指標（KPI）
+
+### 10.1 ユーザーエンゲージメント
+```yaml
+目標指標:
+  - 日次アクティブユーザー率: 30%以上
+  - 月次継続率: 60%以上
+  - 平均セッション時間: 5分以上
+  - レシートアップロード頻度: 週2回以上
+```
+
+### 10.2 ビジネス効果
+```yaml
+目標指標:
+  - 参加店舗売上向上: 20%以上
+  - 新規ユーザー獲得: 月100人以上
+  - ユーザー単価向上: 15%以上
+  - 特典交換率: 40%以上
+```
+
+### 10.3 システム効率
+```yaml
+目標指標:
+  - 自動化率: 90%以上
+  - 管理工数削減: 50%以上
+  - エラー率: 1%未満
+  - 平均レスポンス時間: 1秒未満
+```
+
+---
+
+## 結論
+
+本要件定義により、E-Zuka Connectのゲーミフィケーション機能を実用レベルに引き上げるための包括的な計画を策定しました。特に自動ポイント付与、バッジ判定、特典交換の3つの核心機能の実装が最優先となります。段階的な実装により、ユーザーエンゲージメントの向上と商店街活性化の目標達成を目指します。

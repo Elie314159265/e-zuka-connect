@@ -1,0 +1,270 @@
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, ForeignKey, Text, JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from .database import Base, engine
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, index=True)
+    age_group = Column(String, index=True)  # e.g., "20s", "30s", "40s"
+    gender = Column(String)  # e.g., "male", "female", "other"
+    area = Column(String, index=True)  # 居住エリア
+    is_owner = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # リレーションシップ
+    receipts = relationship("Receipt", back_populates="user")
+    gamification_profile = relationship("GamificationProfile", back_populates="user", uselist=False)
+    line_integration = relationship("LineIntegration", back_populates="user", uselist=False)
+    user_rewards = relationship("UserReward", back_populates="user")
+
+class Receipt(Base):
+    __tablename__ = "receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)  # マルチテナンシー用
+    supplier_name = Column(String, index=True)
+    total_amount = Column(Integer)
+    receipt_date = Column(DateTime(timezone=True), server_default=func.now())
+    image_gcs_path = Column(String)  # GCS画像パス
+    ocr_raw_data = Column(JSON)  # Document AI生データ
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # リレーションシップ
+    user = relationship("User", back_populates="receipts")
+    store = relationship("Store", back_populates="receipts")
+    items = relationship("ReceiptItem", back_populates="receipt", cascade="all, delete-orphan")
+
+class ReceiptItem(Base):
+    __tablename__ = "receipt_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receipt_id = Column(Integer, ForeignKey("receipts.id"))
+    description = Column(String)
+    amount = Column(Integer)
+
+    receipt = relationship("Receipt", back_populates="items")
+
+class WeatherData(Base):
+    __tablename__ = "weather_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(DateTime(timezone=True), unique=True, index=True)
+    temperature_max = Column(Float)  # 最高気温
+    temperature_min = Column(Float)  # 最低気温
+    humidity = Column(Float)
+    weather_code = Column(Integer) # WMO Weather interpretation codes
+    
+# ========== 顧客向けゲーミフィケーション関連テーブル ==========
+
+class GamificationProfile(Base):
+    __tablename__ = "gamification_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    contribution_points = Column(Integer, default=0)  # 現在の貢献ポイント(CP)
+    total_earned_points = Column(Integer, default=0)  # 累計獲得ポイント
+    level = Column(Integer, default=1)  # ユーザーレベル
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # リレーションシップ
+    user = relationship("User", back_populates="gamification_profile")
+    badges = relationship("UserBadge", back_populates="profile")
+    point_transactions = relationship("PointTransaction", back_populates="profile")
+
+class Badge(Base):
+    __tablename__ = "badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(Text)
+    icon_url = Column(String)  # バッジアイコンのURL
+    criteria = Column(JSON)  # 獲得条件（JSON形式）
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    user_badges = relationship("UserBadge", back_populates="badge")
+
+class UserBadge(Base):
+    __tablename__ = "user_badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("gamification_profiles.id"), nullable=False)
+    badge_id = Column(Integer, ForeignKey("badges.id"), nullable=False)
+    earned_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    profile = relationship("GamificationProfile", back_populates="badges")
+    badge = relationship("Badge", back_populates="user_badges")
+
+class PointTransaction(Base):
+    __tablename__ = "point_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("gamification_profiles.id"), nullable=False)
+    transaction_type = Column(String, nullable=False)  # "earn", "redeem", "exchange"
+    points = Column(Integer, nullable=False)  # 正の値=獲得、負の値=消費
+    description = Column(String)
+    transaction_metadata = Column(JSON)  # 追加情報（レシートID、イベントIDなど）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    profile = relationship("GamificationProfile", back_populates="point_transactions")
+
+# ========== LINE連携テーブル ==========
+
+class LineIntegration(Base):
+    __tablename__ = "line_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    line_user_id = Column(String, unique=True, nullable=False)  # LINE User ID
+    line_display_name = Column(String)
+    is_active = Column(Boolean, default=True)
+    linked_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_message_at = Column(DateTime(timezone=True))
+    
+    # リレーションシップ
+    user = relationship("User", back_populates="line_integration")
+
+# ========== 事業者向けテーブル ==========
+
+class Store(Base):
+    __tablename__ = "stores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    business_type = Column(String, index=True)  # 業種
+    address = Column(String)
+    phone = Column(String)
+    email = Column(String)
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # リレーションシップ
+    owners = relationship("StoreOwner", back_populates="store")
+    events = relationship("Event", back_populates="store")
+    receipts = relationship("Receipt", back_populates="store")
+    archive_contents = relationship("ArchiveContent", back_populates="store")
+    rewards = relationship("Reward", back_populates="store")
+
+class StoreOwner(Base):
+    __tablename__ = "store_owners"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=False)
+    role = Column(String, default="owner")  # "owner", "manager", "staff"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True))
+    
+    # リレーションシップ
+    store = relationship("Store", back_populates="owners")
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)  # マルチテナンシー
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    event_type = Column(String, index=True)  # "sale", "event", "coupon"
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    discount_rate = Column(Float)  # 割引率（%）
+    coupon_code = Column(String, unique=True)
+    target_products = Column(JSON)  # 対象商品リスト
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    store = relationship("Store", back_populates="events")
+
+class ArchiveContent(Base):
+    __tablename__ = "archive_contents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)  # マルチテナンシー
+    title = Column(String, nullable=False)
+    content = Column(Text)
+    content_type = Column(String, index=True)  # "story", "history", "photo"
+    image_urls = Column(JSON)  # 画像URLのリスト
+    tags = Column(JSON)  # タグのリスト
+    is_published = Column(Boolean, default=False)
+    published_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # リレーションシップ
+    store = relationship("Store", back_populates="archive_contents")
+
+# ========== 特典・報酬システムテーブル ==========
+
+class Reward(Base):
+    __tablename__ = "rewards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    required_points = Column(Integer, nullable=False)
+    reward_type = Column(String, nullable=False)  # 'coupon', 'gift', 'experience', 'digital'
+    store_id = Column(Integer, ForeignKey("stores.id"))  # NULL = 全店共通
+    stock_quantity = Column(Integer)  # NULL = 無制限
+    available_stock = Column(Integer)
+    is_active = Column(Boolean, default=True)
+    is_featured = Column(Boolean, default=False)
+    valid_days = Column(Integer, default=30)  # クーポン有効日数
+    terms_conditions = Column(Text)
+    image_url = Column(String)
+    expires_at = Column(DateTime(timezone=True))  # 特典自体の期限
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    store = relationship("Store", back_populates="rewards")
+    user_rewards = relationship("UserReward", back_populates="reward")
+
+class UserReward(Base):
+    __tablename__ = "user_rewards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reward_id = Column(Integer, ForeignKey("rewards.id"), nullable=False)
+    coupon_code = Column(String, unique=True)  # 生成されたクーポンコード
+    redeemed_points = Column(Integer, nullable=False)
+    status = Column(String, default="active")  # 'active', 'used', 'expired'
+    expires_at = Column(DateTime(timezone=True))  # 個別クーポンの期限
+    used_at = Column(DateTime(timezone=True))
+    used_store_id = Column(Integer, ForeignKey("stores.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # リレーションシップ
+    user = relationship("User", back_populates="user_rewards")
+    reward = relationship("Reward", back_populates="user_rewards")
+    used_store = relationship("Store", foreign_keys=[used_store_id])
+
+# ========== 初期バッジデータ定義 ==========
+
+class InitialBadgeData(Base):
+    """初期バッジデータを定義するための一時テーブル"""
+    __tablename__ = "initial_badge_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    processed = Column(Boolean, default=False)
+
+# Create tables if they don't exist
+Base.metadata.create_all(bind=engine)

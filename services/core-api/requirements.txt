@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+passlib[bcrypt]
+python-jose[cryptography]
+python-multipart
+google-cloud-storage
+requests
+alembic
+email-validator
+slowapi
+redis
+structlog

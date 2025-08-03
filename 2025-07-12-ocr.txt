@@ -1,0 +1,118 @@
+# 2025/07/12 OCRサービス開発の進捗と再開手順
+
+## 本日の進捗サマリー
+
+### 達成状況
+- **GCP設定**:
+    - `Document AI API` をプロジェクトで有効化した。
+    - `us`リージョンに、レシート解析用のプロセッサ `expense-parser-1` (ID: `your-document-ai-processor-id`) を作成した。
+    - `ocr-processor`サービス専用のサービスアカウント `ocr-processor-sa` を作成し、`Document AI API ユーザー` ロールを付与した。
+    - 上記サービスアカウントのキー (`gcp-credentials.json`) を生成し、`services/ocr-processor/` ディレクトリに保存した。
+    - レシート画像保存用のGCSバケット `your-gcp-project-id-receipts` を作成した。
+- **アプリケーション実装**:
+    - `ocr-processor`サービスの`requirements.txt`に`google-cloud-documentai`と`python-multipart`を追加した。
+    - `services/ocr-processor/app/main.py`に、画像ファイルを受け取り、Document AI APIを呼び出して解析結果を返す`/process/`エンドポ���ントを実装した。
+- **Kubernetesマニフェスト**:
+    - `gcp-credentials.json`の内容から`gcp-ocr-credentials`という名前のKubernetes Secretを作成した。
+    - `ocr-processor-deployment.yaml`を更新し、Secretをボリュームとしてコンテナにマウントし、`GOOGLE_APPLICATION_CREDENTIALS`環境変数を設定するようにした。
+- **動作確認**:
+    - ローカルおよびKubernetesクラスタ上で`ocr-processor`サービスを起動し、`curl`と`kubectl port-forward`を使って、サンプルレシート画像が正常に解析されることを確認した。
+- **サービス間連携**:
+    - `core-api`にGCSへの画像アップロード機能と、`ocr-processor`を呼び出す機能を追加した。
+    - `ocr-processor`をGCSから画像を読み込んで処理するように修正した。
+    - 最終的に、フロントエンド（の代わりのcurl）から`core-api`経由で`ocr-processor`を呼び出し、一連の処理が成功することを確認した。
+
+### 現在の状態
+- `core-api`と`ocr-processor`の連携機能が完成し、動作確認が完了した。
+- 次のステ������として、この機能をフロントエンドから呼び出し、解析結果をデータベースに保存する最終段階の準備が整った。
+
+---
+
+## デバッグと問題解決の記録
+
+### OCRサービス単体
+
+1.  **問題: `gcloud documentai` コマンドの失敗**
+    *   **解決策:** GCPコンソールから手動でプロセッサを作成。
+
+2.  **問題: ローカルサーバーの起動タイムアウト**
+    *   **原因:** `main.py`のトップレベルで`DocumentProcessorServiceClient`を初期化していた。
+    *   **解決策:** FastAPIの`lifespan`イベントハンドラの中でクライアントを初期化するように修正。
+
+3.  **問題: `CrashLoopBackOff` (ImportError)**
+    *   **原因:** DockerfileのUvicorn起動コマンドの問題。
+    *   **解決策:** `core-api`と同様の標準的な起動コマンドに修正。
+
+4.  **問題: `kubectl exec`でのファイル参照エラー**
+    *   **原因:** Pod内部からローカルマシン上のファイルを参照しようとしていた。
+    *   **解決��:** `kubectl port-forward`を使い、ローカルからPod内��サービ��にアクセスしてテスト。
+
+### サービス間連携
+
+1.  **問題: GCSへのアップロード失敗 (412エラー)**
+    *   **現象:** `core-api`からGCSへのアップロード時に`The type of authentication token used for this request requires that Uniform Bucket Level Access be enabled.`エラーが発生。
+    *   **原因:** GCSバケットの権限モデルが「きめ細かい管理」になっていた。IAMベースの認証には「均一」モデルが必要。
+    *   **解決策:** `gsutil uniformbucketlevelaccess set on gs://...`コマンドで、バケットの権限モデルを「均一」に変更。
+
+2.  **問題: サービス間通信の失敗 (NameResolutionError)**
+    *   **現象:** `core-api`から`ocr-processor`を呼び出す際に`Failed to resolve 'ocr-processor'`エラーが発生。
+    *   **原因:** `ocr-processor`のDeploymentは存在したが、他のPodから名前でアクセスするための**Serviceが存在しなかった**。
+    *   **解決策:** `ocr-processor-service.yaml`を新規に作成し、`kustomization.yaml`に追加してデプロイ。
+
+---
+## 2025/07/12 追記: フロントエンド連携とデバッグ
+
+### 達成状況
+- **フロントエンド実装**:
+    - `dashboard`ページにレシートアップロードフォームを実装し、`core-api`への送信機能を確認。
+- **ユーザーフロー改善**:
+    - お客様向け機能（レシートアップロード）と事業者向け機能（経営ダッシュボード）のページを分離。
+    - レシートアップロード機能を`dashboard`から`mypage`に移設。
+    - ログイン・新規登録ページを「お客様用」と「事業者様用」に分割し、それぞれ適切なページ (`/mypage`, `/dashboard`) にリダイレクトするように修正。
+    - ヘッダーのナビゲーションを、分割されたログイン・登録ページに正しく誘導するように更新。
+- **認証機能**:
+    - 状態管理ライブラリ`Zustand`を導入。
+    - ログイン時に取得したJWTトークンをストアに保存し、認証が必要なAPIリクエスト（レシートアップロード）時にAuthorizationヘッダーに付与するよう修正。
+- **データベース連携**:
+    - `core-api`に`Receipt`, `ReceiptItem`, `WeatherData`のDBモデル、スキーマ、CRUD関数を追加。
+    - レシートアップロード時に、認証済みユーザーに紐づけてOCR結果をDBに保存する処理を実装。
+
+### デバッグと問題解決の記録
+
+1.  **問題: OCR結果がフロントエンドで「不明」と表示される**
+    *   **現象:** アップロードは成功するが、UIに「店舗名不明, 合計金額: 金額不明」と表示される。
+    *   **根本原��:** APIのレスポンスキーの不一致。`core-api`は`ocr_result`キーでデータを返していたが、フロントエンドは`analysis_result`キーを期待していた。
+    *   **解決策:** `core-api`の`routers/receipts.py`を修正し、レスポンスのキーを`analysis_result`に変更。`core-api`のイメージを`v1.1.1`として再デプロイして解決。
+
+2.  **問題: 金額が小数点として表示される**
+    *   **現象:** UIに合計金額が「7.040」のように表示される。
+    *   **根本原因:** Document AIが日本の通貨書式（例: `7,040`）を小数点と誤認識し、`ocr-processor`がその文字��を検証・修正せずに返していた。
+    *   **解決策:** `ocr-processor`の`main.py`に、金額文字列から数字以外の文字をすべて取り除き、整数に変換する`clean_and_convert_amount`関数を追加。`total_amount`と`line_item/amount`をこの関数で処理するように修正。
+
+3.  **問題: `ocr-processor` Podが `CrashLoopBackOff` になる**
+    *   **現象:** 上記の金額修正後、アップロードが「Connection refused」エラーで失敗す���ようになった。
+    *   **根本原因:** Pythonのバージョン互換性問題。`ocr-processor`のコンテナはPython 3.9で動作していたが、修正コードでPython 3.10から導入された新しい型ヒント構文 (`int | None`) を使用してしまったため、起動時に`TypeError`が発生しクラッシュしていた。
+    *   **解決策:** `main.py`の型ヒントを、Python 3.9互換の`typing.Optional[int]`に修正。`ocr-processor`のイメージを`v1.1.2`として再デプロイして解決。
+
+4.  **問題: `core-api` Podが `CrashLoopBackOff` になる (複数回)**
+    *   **現象:** DBモデル追加後、`core-api`が起動しなくなった。
+    *   **根本原因1 (ImportError):** `routers/receipts.py`での循環インポート。`from .. import auth`が原因だった。
+    *   **解決策1:** `from ..routers import auth`のように修正したが、これも誤り。最終的に`from .. import security`に修正し、`Depends(security.get_current_user)`を使用することで解決。この過程で複数回のデプロイとログ確認を実施。
+    *   **根本原因2 (UndefinedColumn):** `models.py`で`User`モデルにカラムを追加したが、実際のDBスキーマが更新されていなかったため、SQLクエリが失敗していた。
+    *   **解決策2:** `kubectl exec`で稼働中のPodに入り、`psql`（実際にはコンテナ内になかったためPythonスクリプト）を使って手動で`ALTER TABLE`文を実行し、スキーマを更新して解決。
+
+5.  **問題: レシートアップロードで401 Unauthorizedエラー**
+    *   **現象:** ログイン後、レシートをアップロードしようとすると認証エラーになる。
+    *   **根本原因:** ログイン時に取得したJWTトークンが、フロントエンド側で保存されておらず、APIリクエスト時にヘッダーに付与されていなかった。
+    *   **解決策:** `Zustand`を導入して認証ストアを作成。ログイン時にトークンをストアに保存し、アップロード時にストアからトークンを読み出してAuthorizationヘッダーを付与するように修正。
+
+## 次回再開時の手順
+
+1.  **気象データ取得バッチ処理の実装**:
+    *   外部の気象APIからデータを取得し、`WeatherData`テーブルに保存するバッチ処理を`core-api`に実装する。
+    *   Kubernetesの`CronJob`として定期実行するマニフェストを作成する。
+2.  **分析APIとダッシュボードへの反映**:
+    *   DBに保存したレシートデータと気象データを集計し、分析結果を返すAPIを`core-api`に実装する。
+    *   `frontend`の経営ダッシュボードを、モックアップではなく、この分析APIから取得したデータを表示するように修正する���
+3.  **総合テスト**:
+    *   一連の機能（ユーザー登録→ログイン→レシート投稿→DB保存→気象データ連携→分析結果表示）がすべて正常に動作することを確認する。

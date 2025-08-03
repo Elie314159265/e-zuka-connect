@@ -1,0 +1,170 @@
+# 2025-07-17 開発ログ
+
+## 概要
+Open-Meteo APIから日本気象庁（JMA）APIへの天気データ取得システムの移行作業を実施。商用利用のライセンス問題を解決するための対応。
+
+## 実施内容
+
+### 1. 背景・問題
+- **問題**: Open-Meteo APIは商用利用が有償のため、ライセンス問題が発生
+- **対応方針**: 無料で利用可能な日本気象庁APIに移行することを決定
+
+### 2. 気象庁API調査結果
+
+#### APIエンドポイント
+- **URL**: `https://www.jma.go.jp/bosai/forecast/data/forecast/400000.json`
+- **対象地域**: 福岡県（400000）
+
+#### データ構造解析
+```json
+# 天気データ（福岡地方）
+data[0].timeSeries[0].areas[0] {
+  "area": {"name": "福岡地方", "code": "400010"},
+  "weatherCodes": ["114", "203"],
+  "weathers": ["晴れ後くもり...", "くもり時々雨..."]
+}
+
+# 気温データ（福岡市）
+data[1].timeSeries[1].areas[0] {
+  "area": {"name": "福岡", "code": "82182"},
+  "tempsMax": ["", "32", "34", "35"],
+  "tempsMin": ["", "26", "28", "27"]
+}
+```
+
+### 3. 実装変更詳細
+
+#### ファイル: `services/core-api/app/routers/weather.py`
+
+##### 定数変更
+```python
+# 変更前
+OPEN_METEO_URL = "https://historical-weather-api.open-meteo.com/v1/forecast"
+IIZUKA_LAT = 33.6461
+IIZUKA_LON = 130.6864
+
+# 変更後
+JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/400000.json"
+FUKUOKA_AREA_CODE = "400010"  # 福岡地方（天気情報）
+FUKUOKA_CITY_CODE = "82182"   # 福岡市（気温情報）
+```
+
+##### 主要関数の書き換え
+- `fetch_and_store_weather_data()`: 完全にロジックを書き換え
+- 新規追加: `_map_jma_weather_to_wmo_code()` - 天気文字列をWMOコードに変換
+- 新規追加: `_map_jma_code_to_wmo_code()` - 気象庁コードをWMOコードに変換
+
+### 4. デバッグ過程
+
+#### 初回実装エラー
+```
+{"detail":"Incomplete weather data received from JMA API"}
+```
+
+**原因**: 気象庁APIのデータ構造を誤解していた
+- 天気データと気温データが異なるtimeSeriesに分離されている
+- 地域コードが天気情報（400010）と気温情報（82182）で異なる
+
+#### データ構造調査コマンド
+```bash
+# API構造確認
+curl -s "https://www.jma.go.jp/bosai/forecast/data/forecast/400000.json" | jq '.[0].timeSeries[0]'
+
+# 気温データ確認  
+curl -s "https://www.jma.go.jp/bosai/forecast/data/forecast/400000.json" | jq '.[1].timeSeries[1].areas[0]'
+```
+
+#### 解決方法
+1. 天気データと気温データを別々に取得するロジックに変更
+2. 日付をマッチングして対応する気温データを検索する仕組みを実装
+3. 各データが存在しない場合の適切なデフォルト値設定
+
+### 5. WMOコードマッピング
+
+#### 気象庁天気コード → WMOコード変換
+```python
+# 主要なマッピング例
+100, 101: 0  # 晴れ → Clear sky
+200, 201: 2  # 曇り → Partly cloudy  
+300-350: 61-65  # 雨系 → Rain codes
+400-450: 71  # 雪系 → Snow codes
+```
+
+#### 天気文字列 → WMOコード変換
+```python
+# 文字列パターンマッチング例
+"晴": 0  # Clear sky
+"曇": 3  # Overcast
+"雨": 61  # Rain
+"雪": 71  # Snow
+"雷": 95  # Thunderstorm
+```
+
+### 6. デプロイメント手順
+
+#### Docker イメージビルド・デプロイ
+```bash
+# タイムスタンプ生成
+TAG=$(date +%Y%m%d-%H%M%S)
+
+# イメージビルド
+docker build -t asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:$TAG services/core-api/
+
+# レジストリプッシュ
+docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:$TAG
+
+# Kubernetesデプロイメント更新
+kubectl apply -f kubernetes/base/core-api-deployment.yaml
+```
+
+### 7. 動作確認
+
+#### テスト実行
+```bash
+# 天気データ取得テスト
+kubectl exec -it core-api-7c4dff6bd9-f9fcm -n your-gcp-project-id -- \
+  curl -X POST http://localhost:80/api/weather/fetch-and-store
+
+# 結果: {"message":"Successfully stored 1 new weather data entries from JMA API."}
+```
+
+#### データ確認
+```bash
+# 保存されたデータの確認
+kubectl exec -it core-api-7c4dff6bd9-f9fcm -n your-gcp-project-id -- \
+  curl -s http://localhost:80/api/weather/ | jq '.[0:3]'
+
+# 結果: 気温データ（temperature_max/min）が正しく取得・保存されていることを確認
+```
+
+### 8. 重要な注意点
+
+#### ライセンス
+- **Open-Meteo**: 商用利用は有償（月額$10-50程度）
+- **気象庁API**: 無料、商用利用可能（出典表示推奨）
+
+#### データの違い
+- **Open-Meteo**: 過去データ中心、時間単位の詳細データ
+- **気象庁**: 予報データ中心、日単位の概要データ
+
+#### 技術的制約
+- 気象庁APIは予報データのため、過去データの取得は限定的
+- 現在日以降のデータのみ取得可能
+- 湿度データは気象庁APIでは提供されていない（humidity: null設定）
+
+### 9. 今後の改善点
+
+1. **エラーハンドリング強化**: API応答異常時のフォールバック機能
+2. **データ品質向上**: より詳細な天気コードマッピング
+3. **パフォーマンス**: キャッシュ機能の実装
+4. **監視**: API呼び出し成功率の監視
+
+### 10. 関連ファイル
+
+- `services/core-api/app/routers/weather.py` - メイン実装
+- `kubernetes/base/core-api-deployment.yaml` - デプロイメント設定
+- `services/core-api/app/schemas.py` - データスキーマ
+- `services/core-api/app/models.py` - データベースモデル
+
+### 11. 完了時刻
+2025-07-17 01:14 JST - 気象庁API移行完了、動作確認済み

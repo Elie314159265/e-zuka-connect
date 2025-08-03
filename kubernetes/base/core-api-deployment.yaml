@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+  namespace: your-gcp-project-id
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: core-api
+  template:
+    metadata:
+      labels:
+        app: core-api
+    spec:
+      containers:
+      - name: core-api
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.3.5-analysis-fix
+        ports:
+        - containerPort: 80
+        startupProbe:
+          httpGet:
+            path: /api
+            port: 80
+          failureThreshold: 30
+          periodSeconds: 10
+          initialDelaySeconds: 30
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: DEBUG_MODE
+          value: "false"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/var/secrets/google/key.json"
+        envFrom:
+        - configMapRef:
+            name: app-config
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /var/secrets/google
+          readOnly: true
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: storage-sa-key

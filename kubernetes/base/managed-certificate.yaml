@@ -1,0 +1,9 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: your-gcp-project-id-certificate
+  namespace: your-gcp-project-id
+spec:
+  domains:
+    - your-gcp-project-id.com
+    - www.your-gcp-project-id.com
