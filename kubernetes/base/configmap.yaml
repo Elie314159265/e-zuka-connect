@@ -8,12 +8,11 @@ data:
   GINSENG_MODE: "production"
   LOG_LEVEL: "info"
 
-  # Core API Database Settings
-  DB_USER: "user"
-  DB_PASSWORD: "your-db-password"
+  # Core API Database Settings (CloudSQL)
   DB_NAME: "dbname"
-  DB_HOST: "postgresql-service"
+  DB_HOST: "127.0.0.1"  # Cloud SQL Proxyを使用
   DB_PORT: "5432"
 
   # Core API JWT Settings
   JWT_SECRET_KEY: "your-secret-key-here-change-this-in-production"
+  JWT_REFRESH_SECRET_KEY: "your-refresh-secret-key-here-change-this-in-production"

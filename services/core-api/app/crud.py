@@ -409,8 +409,343 @@ def create_weather_data(db: Session, weather: schemas.WeatherDataCreate):
     db.refresh(db_weather)
     return db_weather
 
+def upsert_weather_data(db: Session, weather: schemas.WeatherDataCreate):
+    """
+    天気データをUPSERT（更新または作成）する
+    同じ日付のデータが存在する場合は更新、存在しない場合は新規作成
+    """
+    from datetime import datetime
+
+    # 日付を正規化（date型をdatetime型に変換）
+    target_date = weather.date
+    if hasattr(target_date, 'date'):
+        target_date = target_date.date()
+    target_datetime = datetime.combine(target_date, datetime.min.time())
+
+    # 既存データを検索
+    existing = db.query(models.WeatherData).filter(
+        models.WeatherData.date == target_datetime
+    ).first()
+
+    if existing:
+        # 既存データを更新
+        for key, value in weather.dict().items():
+            if value is not None:  # Noneでない値のみ更新
+                setattr(existing, key, value)
+        db.commit()
+        db.refresh(existing)
+        return existing
+    else:
+        # 新規作成
+        weather_dict = weather.dict()
+        weather_dict['date'] = target_datetime
+        db_weather = models.WeatherData(**weather_dict)
+        db.add(db_weather)
+        db.commit()
+        db.refresh(db_weather)
+        return db_weather
+
 def get_weather_data_by_date(db: Session, date: str):
     return db.query(models.WeatherData).filter(models.WeatherData.date == date).first()
 
 def get_weather_data(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.WeatherData).offset(skip).limit(limit).all()
+
+def get_weather_data_in_date_range(db: Session, start_date, end_date):
+    """
+    指定した日付範囲の天気データを取得する
+    Args:
+        start_date: 開始日
+        end_date: 終了日
+    """
+    from datetime import datetime
+
+    # date型をdatetime型に変換
+    start_datetime = datetime.combine(start_date, datetime.min.time()) if hasattr(start_date, 'day') else start_date
+    end_datetime = datetime.combine(end_date, datetime.max.time()) if hasattr(end_date, 'day') else end_date
+
+    return db.query(models.WeatherData).filter(
+        models.WeatherData.date >= start_datetime,
+        models.WeatherData.date <= end_datetime
+    ).order_by(models.WeatherData.date).all()
+
+def delete_old_weather_data(db: Session, days_to_keep: int = 7):
+    """
+    指定した日数より古い天気データを削除する
+    Args:
+        days_to_keep: 保持する日数（デフォルト7日）
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+    deleted_count = db.query(models.WeatherData).filter(
+        models.WeatherData.date < cutoff_date
+    ).delete()
+    db.commit()
+    return deleted_count
+
+def delete_weather_data_in_range(db: Session, start_date, end_date):
+    """
+    指定した日付範囲の天気データを削除する（洗い替え用）
+    Args:
+        start_date: 削除開始日
+        end_date: 削除終了日
+    """
+    from datetime import datetime
+
+    # date型をdatetime型に変換
+    start_datetime = datetime.combine(start_date, datetime.min.time()) if hasattr(start_date, 'day') else start_date
+    end_datetime = datetime.combine(end_date, datetime.max.time()) if hasattr(end_date, 'day') else end_date
+
+    deleted_count = db.query(models.WeatherData).filter(
+        models.WeatherData.date >= start_datetime,
+        models.WeatherData.date <= end_datetime
+    ).delete()
+    db.commit()
+    return deleted_count
+
+def delete_future_weather_data(db: Session, from_date):
+    """
+    指定した日付以降の天気データを削除する（予報データ更新用）
+    Args:
+        from_date: この日付以降のデータを削除
+    """
+    from datetime import datetime
+
+    # date型をdatetime型に変換
+    from_datetime = datetime.combine(from_date, datetime.min.time()) if hasattr(from_date, 'day') else from_date
+
+    deleted_count = db.query(models.WeatherData).filter(
+        models.WeatherData.date >= from_datetime
+    ).delete()
+    db.commit()
+    return deleted_count
+
+# Historical WeatherData CRUD
+def create_historical_weather_data(db: Session, weather: schemas.HistoricalWeatherDataCreate):
+    """過去気象データを作成"""
+    db_weather = models.HistoricalWeatherData(**weather.dict())
+    db.add(db_weather)
+    db.commit()
+    db.refresh(db_weather)
+    return db_weather
+
+def get_historical_weather_data_by_date(db: Session, date: str):
+    """指定日付の過去気象データを取得"""
+    return db.query(models.HistoricalWeatherData).filter(models.HistoricalWeatherData.date == date).first()
+
+def get_historical_weather_data(db: Session, skip: int = 0, limit: int = 100):
+    """過去気象データ一覧を取得"""
+    return db.query(models.HistoricalWeatherData).order_by(models.HistoricalWeatherData.date.desc()).offset(skip).limit(limit).all()
+
+def get_historical_weather_data_in_date_range(db: Session, start_date, end_date):
+    """指定日付範囲の過去気象データを取得"""
+    from datetime import datetime
+
+    # date型をdatetime型に変換
+    start_datetime = datetime.combine(start_date, datetime.min.time()) if hasattr(start_date, 'day') else start_date
+    end_datetime = datetime.combine(end_date, datetime.max.time()) if hasattr(end_date, 'day') else end_date
+
+    return db.query(models.HistoricalWeatherData).filter(
+        models.HistoricalWeatherData.date >= start_datetime,
+        models.HistoricalWeatherData.date <= end_datetime
+    ).order_by(models.HistoricalWeatherData.date).all()
+
+def delete_historical_weather_data_in_range(db: Session, start_date, end_date):
+    """指定日付範囲の過去気象データを削除"""
+    from datetime import datetime
+
+    start_datetime = datetime.combine(start_date, datetime.min.time()) if hasattr(start_date, 'day') else start_date
+    end_datetime = datetime.combine(end_date, datetime.max.time()) if hasattr(end_date, 'day') else end_date
+
+    deleted_count = db.query(models.HistoricalWeatherData).filter(
+        models.HistoricalWeatherData.date >= start_datetime,
+        models.HistoricalWeatherData.date <= end_datetime
+    ).delete()
+    db.commit()
+    return deleted_count
+
+def upsert_historical_weather_data(db: Session, weather: schemas.HistoricalWeatherDataCreate):
+    """
+    過去気象データを挿入または更新（UPSERT）
+    同じ日付のデータが存在する場合は更新、なければ新規作成
+    """
+    existing = get_historical_weather_data_by_date(db, weather.date.strftime('%Y-%m-%d %H:%M:%S%z'))
+
+    if existing:
+        # 更新
+        for key, value in weather.dict(exclude={'date'}).items():
+            if value is not None:  # None以外の値のみ更新
+                setattr(existing, key, value)
+
+        from datetime import datetime
+        existing.updated_at = datetime.now()
+        db.commit()
+        db.refresh(existing)
+        return existing
+    else:
+        # 新規作成
+        return create_historical_weather_data(db, weather)
+
+# ========== 商品管理 CRUD ==========
+
+# ProductCategory CRUD
+def create_product_category(db: Session, category: schemas.ProductCategoryCreate):
+    """商品カテゴリを作成"""
+    db_category = models.ProductCategory(**category.dict())
+    db.add(db_category)
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+
+def get_product_categories(db: Session, store_id: int, skip: int = 0, limit: int = 100):
+    """店舗の商品カテゴリ一覧を取得"""
+    return db.query(models.ProductCategory).filter(
+        models.ProductCategory.store_id == store_id
+    ).order_by(models.ProductCategory.sort_order, models.ProductCategory.name).offset(skip).limit(limit).all()
+
+def get_product_category(db: Session, category_id: int):
+    """商品カテゴリを取得"""
+    return db.query(models.ProductCategory).filter(models.ProductCategory.id == category_id).first()
+
+def update_product_category(db: Session, category_id: int, category_update: schemas.ProductCategoryUpdate):
+    """商品カテゴリを更新"""
+    db_category = get_product_category(db, category_id)
+    if not db_category:
+        return None
+
+    update_data = category_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_category, key, value)
+
+    from datetime import datetime
+    db_category.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+
+def delete_product_category(db: Session, category_id: int):
+    """商品カテゴリを削除"""
+    db_category = get_product_category(db, category_id)
+    if not db_category:
+        return False
+
+    db.delete(db_category)
+    db.commit()
+    return True
+
+# Product CRUD
+def create_product(db: Session, product: schemas.ProductCreate):
+    """商品を作成"""
+    db_product = models.Product(**product.dict())
+    db.add(db_product)
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+def get_products(db: Session, store_id: int, category_id: int = None, is_active: bool = None,
+                skip: int = 0, limit: int = 100):
+    """店舗の商品一覧を取得"""
+    query = db.query(models.Product).filter(models.Product.store_id == store_id)
+
+    if category_id is not None:
+        query = query.filter(models.Product.category_id == category_id)
+
+    if is_active is not None:
+        query = query.filter(models.Product.is_active == is_active)
+
+    return query.order_by(models.Product.name).offset(skip).limit(limit).all()
+
+def get_product(db: Session, product_id: int):
+    """商品を取得"""
+    return db.query(models.Product).filter(models.Product.id == product_id).first()
+
+def get_product_by_code(db: Session, store_id: int, product_code: str):
+    """商品コードで商品を取得"""
+    return db.query(models.Product).filter(
+        models.Product.store_id == store_id,
+        models.Product.product_code == product_code
+    ).first()
+
+def update_product(db: Session, product_id: int, product_update: schemas.ProductUpdate):
+    """商品を更新"""
+    db_product = get_product(db, product_id)
+    if not db_product:
+        return None
+
+    update_data = product_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_product, key, value)
+
+    from datetime import datetime
+    db_product.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+def delete_product(db: Session, product_id: int):
+    """商品を削除"""
+    db_product = get_product(db, product_id)
+    if not db_product:
+        return False
+
+    db.delete(db_product)
+    db.commit()
+    return True
+
+def update_product_stock(db: Session, product_id: int, quantity_change: int, reason: str = "adjustment"):
+    """商品在庫を更新"""
+    db_product = get_product(db, product_id)
+    if not db_product:
+        return None
+
+    if not db_product.is_stock_managed:
+        return db_product  # 在庫管理対象外の場合はそのまま返す
+
+    new_stock = db_product.stock_quantity + quantity_change
+    if new_stock < 0:
+        raise ValueError("在庫数が負の値になります")
+
+    db_product.stock_quantity = new_stock
+
+    from datetime import datetime
+    db_product.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+def get_low_stock_products(db: Session, store_id: int):
+    """在庫が少ない商品を取得"""
+    return db.query(models.Product).filter(
+        models.Product.store_id == store_id,
+        models.Product.is_stock_managed == True,
+        models.Product.is_active == True,
+        models.Product.stock_quantity <= models.Product.low_stock_threshold
+    ).order_by(models.Product.stock_quantity).all()
+
+def search_products(db: Session, store_id: int, search_query: str, skip: int = 0, limit: int = 100):
+    """商品を検索"""
+    search_term = f"%{search_query}%"
+    return db.query(models.Product).filter(
+        models.Product.store_id == store_id,
+        models.Product.is_active == True,
+        (models.Product.name.ilike(search_term) |
+         models.Product.description.ilike(search_term) |
+         models.Product.product_code.ilike(search_term))
+    ).order_by(models.Product.name).offset(skip).limit(limit).all()
+
+def get_featured_products(db: Session, store_id: int, limit: int = 10):
+    """おすすめ商品を取得"""
+    return db.query(models.Product).filter(
+        models.Product.store_id == store_id,
+        models.Product.is_active == True,
+        models.Product.is_featured == True
+    ).order_by(models.Product.name).limit(limit).all()
+
+def get_seasonal_products(db: Session, store_id: int, limit: int = 10):
+    """季節商品を取得"""
+    return db.query(models.Product).filter(
+        models.Product.store_id == store_id,
+        models.Product.is_active == True,
+        models.Product.is_seasonal == True
+    ).order_by(models.Product.name).limit(limit).all()

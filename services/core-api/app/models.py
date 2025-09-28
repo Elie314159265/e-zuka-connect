@@ -62,7 +62,40 @@ class WeatherData(Base):
     temperature_min = Column(Float)  # 最低気温
     humidity = Column(Float)
     weather_code = Column(Integer) # WMO Weather interpretation codes
-    
+
+# ========== 過去気象データ分析用テーブル ==========
+
+class HistoricalWeatherData(Base):
+    __tablename__ = "historical_weather_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(DateTime(timezone=True), unique=True, index=True)
+
+    # 基本気温データ
+    temperature_max = Column(Float)  # 最高気温 (°C)
+    temperature_min = Column(Float)  # 最低気温 (°C)
+    temperature_mean = Column(Float)  # 平均気温 (°C)
+
+    # 降水データ
+    precipitation_sum = Column(Float)  # 総降水量 (mm)
+    rain_sum = Column(Float)  # 雨量 (mm)
+    snowfall_sum = Column(Float)  # 降雪量 (cm)
+
+    # 湿度・風データ
+    humidity_mean = Column(Float)  # 平均湿度 (%)
+    wind_speed_max = Column(Float)  # 最大風速 (km/h)
+    wind_direction = Column(Integer)  # 風向 (度)
+
+    # 気圧・日照
+    pressure_mean = Column(Float)  # 平均気圧 (hPa)
+    sunshine_duration = Column(Float)  # 日照時間 (hours)
+
+    # データソース情報
+    data_source = Column(String, default="open-meteo")  # データソース
+    weather_code = Column(Integer)  # WMO Weather interpretation codes
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 # ========== 顧客向けゲーミフィケーション関連テーブル ==========
 
 class GamificationProfile(Base):
@@ -159,6 +192,8 @@ class Store(Base):
     receipts = relationship("Receipt", back_populates="store")
     archive_contents = relationship("ArchiveContent", back_populates="store")
     rewards = relationship("Reward", back_populates="store")
+    product_categories = relationship("ProductCategory", back_populates="store")
+    products = relationship("Product", back_populates="store")
 
 class StoreOwner(Base):
     __tablename__ = "store_owners"
@@ -257,12 +292,75 @@ class UserReward(Base):
     reward = relationship("Reward", back_populates="user_rewards")
     used_store = relationship("Store", foreign_keys=[used_store_id])
 
+# ========== 商品管理テーブル ==========
+
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text)
+    parent_category_id = Column(Integer, ForeignKey("product_categories.id"))  # 階層構造
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)  # 表示順序
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # リレーションシップ
+    store = relationship("Store", back_populates="product_categories")
+    parent = relationship("ProductCategory", remote_side=[id], backref="children")
+    products = relationship("Product", back_populates="category")
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("product_categories.id"))
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text)
+    product_code = Column(String, index=True)  # 商品コード（JANコード等）
+    unit_price = Column(Integer, nullable=False)  # 単価（円単位）
+    cost_price = Column(Integer)  # 原価（円単位）
+    tax_rate = Column(Float, default=0.10)  # 消費税率
+    unit = Column(String, default="個")  # 単位（個、kg、L等）
+
+    # 在庫管理
+    stock_quantity = Column(Integer, default=0)  # 在庫数
+    low_stock_threshold = Column(Integer, default=10)  # 在庫少警告閾値
+    is_stock_managed = Column(Boolean, default=True)  # 在庫管理対象か
+
+    # 商品状態
+    is_active = Column(Boolean, default=True)  # 販売中かどうか
+    is_featured = Column(Boolean, default=False)  # おすすめ商品か
+    is_seasonal = Column(Boolean, default=False)  # 季節商品か
+
+    # 販売情報
+    sale_start_date = Column(DateTime(timezone=True))  # 販売開始日
+    sale_end_date = Column(DateTime(timezone=True))    # 販売終了日
+
+    # 画像・メディア
+    image_urls = Column(JSON)  # 商品画像URLのリスト
+
+    # メタデータ
+    tags = Column(JSON)  # タグのリスト
+    allergen_info = Column(JSON)  # アレルギー情報
+    nutritional_info = Column(JSON)  # 栄養成分情報
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # リレーションシップ
+    store = relationship("Store", back_populates="products")
+    category = relationship("ProductCategory", back_populates="products")
+
 # ========== 初期バッジデータ定義 ==========
 
 class InitialBadgeData(Base):
     """初期バッジデータを定義するための一時テーブル"""
     __tablename__ = "initial_badge_data"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     processed = Column(Boolean, default=False)
 

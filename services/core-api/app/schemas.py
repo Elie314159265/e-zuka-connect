@@ -5,8 +5,8 @@ from datetime import datetime, date
 # WeatherData Schemas
 class WeatherDataBase(BaseModel):
     date: datetime
-    temperature_max: float
-    temperature_min: float
+    temperature_max: Optional[float] = None
+    temperature_min: Optional[float] = None
     humidity: Optional[float] = None
     weather_code: int
 
@@ -15,6 +15,34 @@ class WeatherDataCreate(WeatherDataBase):
 
 class WeatherData(WeatherDataBase):
     id: int
+
+    class Config:
+        from_attributes = True
+
+# Historical Weather Data Schemas
+class HistoricalWeatherDataBase(BaseModel):
+    date: datetime
+    temperature_max: Optional[float] = None
+    temperature_min: Optional[float] = None
+    temperature_mean: Optional[float] = None
+    precipitation_sum: Optional[float] = None
+    rain_sum: Optional[float] = None
+    snowfall_sum: Optional[float] = None
+    humidity_mean: Optional[float] = None
+    wind_speed_max: Optional[float] = None
+    wind_direction: Optional[int] = None
+    pressure_mean: Optional[float] = None
+    sunshine_duration: Optional[float] = None
+    data_source: str = "open-meteo"
+    weather_code: Optional[int] = None
+
+class HistoricalWeatherDataCreate(HistoricalWeatherDataBase):
+    pass
+
+class HistoricalWeatherData(HistoricalWeatherDataBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -346,3 +374,102 @@ class BadgeAwardResult(BaseModel):
     badge_id: int
     badge_name: str
     is_new: bool  # 新規獲得かどうか
+
+# ========== 商品管理スキーマ ==========
+
+class ProductCategoryBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_category_id: Optional[int] = None
+    is_active: bool = True
+    sort_order: int = 0
+
+class ProductCategoryCreate(ProductCategoryBase):
+    store_id: int
+
+class ProductCategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    parent_category_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+class ProductCategory(ProductCategoryBase):
+    id: int
+    store_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ProductBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    product_code: Optional[str] = None
+    unit_price: int
+    cost_price: Optional[int] = None
+    tax_rate: float = 0.10
+    unit: str = "個"
+    stock_quantity: int = 0
+    low_stock_threshold: int = 10
+    is_stock_managed: bool = True
+    is_active: bool = True
+    is_featured: bool = False
+    is_seasonal: bool = False
+    sale_start_date: Optional[datetime] = None
+    sale_end_date: Optional[datetime] = None
+    image_urls: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    allergen_info: Optional[Dict[str, Any]] = None
+    nutritional_info: Optional[Dict[str, Any]] = None
+
+class ProductCreate(ProductBase):
+    store_id: int
+    category_id: Optional[int] = None
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[int] = None
+    product_code: Optional[str] = None
+    unit_price: Optional[int] = None
+    cost_price: Optional[int] = None
+    tax_rate: Optional[float] = None
+    unit: Optional[str] = None
+    stock_quantity: Optional[int] = None
+    low_stock_threshold: Optional[int] = None
+    is_stock_managed: Optional[bool] = None
+    is_active: Optional[bool] = None
+    is_featured: Optional[bool] = None
+    is_seasonal: Optional[bool] = None
+    sale_start_date: Optional[datetime] = None
+    sale_end_date: Optional[datetime] = None
+    image_urls: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    allergen_info: Optional[Dict[str, Any]] = None
+    nutritional_info: Optional[Dict[str, Any]] = None
+
+class Product(ProductBase):
+    id: int
+    store_id: int
+    category_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    category: Optional[ProductCategory] = None
+
+    class Config:
+        from_attributes = True
+
+class ProductListResponse(BaseModel):
+    products: List[Product]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+class ProductStockUpdate(BaseModel):
+    product_id: int
+    quantity_change: int  # 正の値=入庫、負の値=出庫
+    reason: str  # "purchase", "sale", "adjustment", "return"
+    notes: Optional[str] = None

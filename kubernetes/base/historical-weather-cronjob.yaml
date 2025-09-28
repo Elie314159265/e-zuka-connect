@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: historical-weather-fetch-cronjob
+  namespace: your-gcp-project-id
+spec:
+  # 毎日午前2時（JST）= UTC 17:00に実行
+  # 過去データの更新なので、1日1回で十分
+  schedule: "0 17 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: historical-weather-fetcher
+            image: curlimages/curl:8.14.1
+            args:
+            - -X
+            - POST
+            - http://core-api/api/historical-weather/fetch-and-store?weeks_back=8
+            - -H
+            - "Content-Type: application/json"
+          restartPolicy: OnFailure

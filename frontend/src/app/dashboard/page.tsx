@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Sparkles, Sun, CloudRain, BarChart3, PieChart as PieChartIcon, AlertTriangle } from 'lucide-react';
+import { Sparkles, Sun, CloudRain, BarChart3, PieChart as PieChartIcon, AlertTriangle, Package, Settings, Users } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 import AiAdviceModal from '../../components/AiAdviceModal';
 import { useAuthStore } from '../../store/authStore';
@@ -180,16 +180,71 @@ export default function DashboardPage() {
                     <Link href="/" className="text-sm text-gray-500 hover:text-gray-700">トップページに戻る</Link>
                 </div>
 
-                <div className="text-center mb-8">
-                    <motion.button
-                        onClick={() => setIsModalOpen(true)}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold py-3 px-6 rounded-full focus:outline-none focus:shadow-outline transition-all shadow-lg hover:shadow-xl flex items-center justify-center mx-auto"
-                    >
-                        <Sparkles className="w-5 h-5 mr-2"/>
-                        AIによる経営アドバイス ✨
-                    </motion.button>
+                {/* Quick Actions */}
+                <div className="mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <Link href="/products">
+                            <motion.div
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                            >
+                                <div className="flex items-center justify-center mb-2">
+                                    <Package className="w-8 h-8 text-blue-600" />
+                                </div>
+                                <h3 className="text-center font-semibold text-gray-900">商品管理</h3>
+                                <p className="text-center text-sm text-gray-600 mt-1">商品の追加・編集</p>
+                            </motion.div>
+                        </Link>
+
+                        <motion.div
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                        >
+                            <div className="flex items-center justify-center mb-2">
+                                <Users className="w-8 h-8 text-green-600" />
+                            </div>
+                            <h3 className="text-center font-semibold text-gray-900">顧客管理</h3>
+                            <p className="text-center text-sm text-gray-600 mt-1">近日公開</p>
+                        </motion.div>
+
+                        <motion.div
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                        >
+                            <div className="flex items-center justify-center mb-2">
+                                <BarChart3 className="w-8 h-8 text-purple-600" />
+                            </div>
+                            <h3 className="text-center font-semibold text-gray-900">売上分析</h3>
+                            <p className="text-center text-sm text-gray-600 mt-1">詳細レポート</p>
+                        </motion.div>
+
+                        <motion.div
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                        >
+                            <div className="flex items-center justify-center mb-2">
+                                <Settings className="w-8 h-8 text-gray-600" />
+                            </div>
+                            <h3 className="text-center font-semibold text-gray-900">設定</h3>
+                            <p className="text-center text-sm text-gray-600 mt-1">店舗情報設定</p>
+                        </motion.div>
+                    </div>
+
+                    <div className="text-center">
+                        <motion.button
+                            onClick={() => setIsModalOpen(true)}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold py-3 px-6 rounded-full focus:outline-none focus:shadow-outline transition-all shadow-lg hover:shadow-xl flex items-center justify-center mx-auto"
+                        >
+                            <Sparkles className="w-5 h-5 mr-2"/>
+                            AIによる経営アドバイス ✨
+                        </motion.button>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

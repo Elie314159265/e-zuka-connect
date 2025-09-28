@@ -4,8 +4,12 @@ metadata:
   name: weather-fetch-cronjob
   namespace: your-gcp-project-id
 spec:
-  # JST 01:00 (UTC 16:00) に毎日実行
-  schedule: "0 16 * * *"
+  # 気象庁APIから最新の予報データを取得してCloudSQLに保存
+  # 手動登録された過去データは保持し、今日以降の予報データのみ更新
+  # JST 01:00 (UTC 16:00) に毎日実行 - 気象庁の予報更新タイミングに合わせる
+  #schedule: "0 16 * * *"
+  # schedule: "0 * * * *" # 毎時（テスト用）
+  schedule: "0 15 * * *" # 毎分（デバッグ用）
   jobTemplate:
     spec:
       template:
@@ -17,4 +21,6 @@ spec:
             - -X
             - POST
             - http://core-api/api/weather/fetch-and-store
+            - -H
+            - "Content-Type: application/json"
           restartPolicy: OnFailure

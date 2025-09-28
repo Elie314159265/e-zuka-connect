@@ -62,8 +62,18 @@ export default function UserLoginPage() {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'ログインに失敗しました。');
+                let errorMessage = 'ログインに失敗しました。';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.detail || errorMessage;
+                } catch (jsonError) {
+                    // JSONパースエラーの場合はHTMLレスポンスの可能性があるため
+                    const textResponse = await response.text();
+                    if (textResponse.includes('Internal Server Error')) {
+                        errorMessage = 'サーバーエラーが発生しました。しばらく時間をおいて再度お試しください。';
+                    }
+                }
+                throw new Error(errorMessage);
             }
 
             const data = await response.json();

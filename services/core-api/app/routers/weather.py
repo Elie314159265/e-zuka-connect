@@ -105,10 +105,26 @@ def read_weather_data(skip: int = 0, limit: int = 100, db: Session = Depends(get
     weather_data = crud.get_weather_data(db, skip=skip, limit=limit)
     return weather_data
 
+@router.get("/recent", response_model=List[schemas.WeatherData])
+def read_recent_weather_data(days: int = 7, db: Session = Depends(get_db)):
+    """
+    過去の手動データと未来の予報データを統合して、指定日数分の気象データを取得します。
+    Args:
+        days: 取得する日数（デフォルト7日、今日を含む前後の日数）
+    """
+    today = datetime.utcnow().date()
+    start_date = today - timedelta(days=days-1)  # 例：7日なら6日前から今日まで
+    end_date = today + timedelta(days=days-1)    # 例：7日なら今日から6日後まで
+
+    weather_data = crud.get_weather_data_in_date_range(db, start_date, end_date)
+    return weather_data
+
 @router.post("/fetch-and-store", status_code=201)
 def fetch_and_store_weather_data(db: Session = Depends(get_db)):
     """
-    過去1週間分の福岡地方の気象データを気象庁APIから取得し、DBに保存します。
+    福岡地方の気象データ（今日以降の予報）を気象庁APIから取得し、
+    UPSERT処理で既存データを更新または新規作成します。
+    拡張: より多くの未来日付データを取得し、詳細なログを提供します。
     """
     try:
         # 気象庁の天気予報APIからデータを取得
@@ -118,10 +134,10 @@ def fetch_and_store_weather_data(db: Session = Depends(get_db)):
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch weather data: {str(e)}")
 
-    # 天気データ（福岡地方）と気温データ（福岡市）を探す
-    weather_data = None
-    temp_data = None
-    
+    # すべての天気データと気温データを収集
+    all_weather_data = []
+    all_temp_data = []
+
     for forecast in data:
         time_series = forecast.get("timeSeries", [])
         for ts in time_series:
@@ -130,75 +146,176 @@ def fetch_and_store_weather_data(db: Session = Depends(get_db)):
                 area_code = area_data.get("area", {}).get("code")
                 # 天気データ（福岡地方）
                 if area_code == FUKUOKA_AREA_CODE and "weathers" in area_data:
-                    weather_data = {
+                    all_weather_data.append({
                         "times": ts.get("timeDefines", []),
                         "weathers": area_data.get("weathers", []),
                         "weatherCodes": area_data.get("weatherCodes", [])
-                    }
+                    })
                 # 気温データ（福岡市）
                 elif area_code == FUKUOKA_CITY_CODE and "tempsMax" in area_data:
-                    temp_data = {
+                    all_temp_data.append({
                         "times": ts.get("timeDefines", []),
                         "tempsMax": area_data.get("tempsMax", []),
                         "tempsMin": area_data.get("tempsMin", [])
-                    }
+                    })
 
-    if not weather_data or not weather_data["weathers"]:
+    if not all_weather_data:
         raise HTTPException(status_code=404, detail="Fukuoka weather data not found in JMA API response")
 
     stored_count = 0
-    today = datetime.utcnow().date()
-    
-    # 天気データの時間軸をベースに処理
-    for i, time_str in enumerate(weather_data["times"]):
-        try:
-            # ISO形式の日時をパース（タイムゾーンを考慮）
-            weather_date = datetime.fromisoformat(time_str).date()
-            
-            # 今日以降のデータのみ処理（過去データは除外）
-            if weather_date < today:
+
+    # 日付ベースのデータマップを作成
+    weather_by_date = {}
+    temp_by_date = {}
+
+    # すべての天気データを日付でインデックス化（日付フィルタリングなし）
+    for weather_data in all_weather_data:
+        for i, time_str in enumerate(weather_data["times"]):
+            try:
+                # JSTの時刻文字列から日付を抽出（タイムゾーン情報は自動的に処理される）
+                weather_date = datetime.fromisoformat(time_str).date()
+                if weather_date not in weather_by_date:
+                    weather_by_date[weather_date] = {}
+
+                    # 天気コード
+                    if len(weather_data["weatherCodes"]) > i:
+                        weather_by_date[weather_date]["weather_code"] = weather_data["weatherCodes"][i]
+
+                    # 天気文字列
+                    if len(weather_data["weathers"]) > i:
+                        weather_by_date[weather_date]["weather_text"] = weather_data["weathers"][i]
+            except (ValueError, IndexError):
                 continue
-                
-            # 既存データがないか確認
-            if not crud.get_weather_data_by_date(db, weather_date.strftime('%Y-%m-%d')):
-                # 気温データを検索（対応する日付のインデックスを探す）
-                temp_max = temp_min = None
-                if temp_data:
-                    for j, temp_time_str in enumerate(temp_data["times"]):
-                        temp_date = datetime.fromisoformat(temp_time_str).date()
-                        if temp_date == weather_date:
+
+    # すべての気温データを日付でインデックス化（日付フィルタリングなし）
+    for temp_data in all_temp_data:
+        for i, time_str in enumerate(temp_data["times"]):
+            try:
+                # JSTの時刻文字列から日付を抽出（タイムゾーン情報は自動的に処理される）
+                temp_date = datetime.fromisoformat(time_str).date()
+                if temp_date not in temp_by_date:
+                    temp_by_date[temp_date] = {}
+
+                    # 最高気温
+                    if len(temp_data["tempsMax"]) > i:
+                        temp_max_str = temp_data["tempsMax"][i]
+                        if temp_max_str and temp_max_str != "":
                             try:
-                                temp_max_str = temp_data["tempsMax"][j] if len(temp_data["tempsMax"]) > j else ""
-                                temp_min_str = temp_data["tempsMin"][j] if len(temp_data["tempsMin"]) > j else ""
-                                temp_max = float(temp_max_str) if temp_max_str and temp_max_str != "" else None
-                                temp_min = float(temp_min_str) if temp_min_str and temp_min_str != "" else None
-                            except (ValueError, IndexError):
-                                temp_max = temp_min = None
-                            break
-                
-                # 天気コードまたは天気文字列からWMOコードを生成
-                weather_code = 3  # デフォルト: 曇り
-                if len(weather_data["weatherCodes"]) > i:
-                    # 気象庁の天気コードをWMOコードに変換（簡易版）
-                    jma_code = weather_data["weatherCodes"][i]
-                    weather_code = _map_jma_code_to_wmo_code(jma_code)
-                elif len(weather_data["weathers"]) > i:
-                    # 天気文字列からWMOコードを推定
-                    weather_text = weather_data["weathers"][i]
-                    weather_code = _map_jma_weather_to_wmo_code(weather_text)
-                
-                weather_data_create = schemas.WeatherDataCreate(
-                    date=datetime.combine(weather_date, datetime.min.time()),
-                    temperature_max=temp_max,
-                    temperature_min=temp_min,
-                    humidity=None,
-                    weather_code=weather_code
-                )
-                crud.create_weather_data(db=db, weather=weather_data_create)
-                stored_count += 1
-                
-        except (ValueError, IndexError) as e:
-            # 個別の日付処理エラーは無視して続行
+                                temp_by_date[temp_date]["temp_max"] = float(temp_max_str)
+                            except ValueError:
+                                pass
+
+                    # 最低気温
+                    if len(temp_data["tempsMin"]) > i:
+                        temp_min_str = temp_data["tempsMin"][i]
+                        if temp_min_str and temp_min_str != "":
+                            try:
+                                temp_by_date[temp_date]["temp_min"] = float(temp_min_str)
+                            except ValueError:
+                                pass
+            except (ValueError, IndexError):
+                continue
+
+    # 統合データを作成
+    all_dates = set(weather_by_date.keys()) | set(temp_by_date.keys())
+    processed_dates = []
+
+    for weather_date in sorted(all_dates):
+        # 天気コード取得
+        weather_code = 3  # デフォルト: 曇り
+        weather_info = weather_by_date.get(weather_date, {})
+
+        if "weather_code" in weather_info:
+            weather_code = _map_jma_code_to_wmo_code(weather_info["weather_code"])
+        elif "weather_text" in weather_info:
+            weather_code = _map_jma_weather_to_wmo_code(weather_info["weather_text"])
+
+        # 気温データ取得
+        temp_info = temp_by_date.get(weather_date, {})
+        temp_max = temp_info.get("temp_max")
+        temp_min = temp_info.get("temp_min")
+
+        try:
+            weather_data_create = schemas.WeatherDataCreate(
+                date=datetime.combine(weather_date, datetime.min.time()),
+                temperature_max=temp_max,
+                temperature_min=temp_min,
+                humidity=None,
+                weather_code=weather_code
+            )
+            crud.upsert_weather_data(db=db, weather=weather_data_create)
+            stored_count += 1
+            processed_dates.append(weather_date.strftime('%Y-%m-%d'))
+        except Exception as e:
             continue
-            
-    return {"message": f"Successfully stored {stored_count} new weather data entries from JMA API."}
+
+    # 実際の処理範囲を計算
+    if processed_dates:
+        actual_start_date = min(processed_dates)
+        actual_end_date = max(processed_dates)
+        actual_date_range = f"{actual_start_date} to {actual_end_date}"
+    else:
+        actual_date_range = "No data processed"
+
+    # デバッグ情報を含むレスポンス
+    return {
+        "message": f"Successfully upserted {stored_count} weather data entries from JMA API.",
+        "processed_dates": processed_dates,
+        "actual_date_range": actual_date_range,
+        "note": "Processing all available dates from JMA API timeDefines",
+        "weather_sources": len(all_weather_data),
+        "temp_sources": len(all_temp_data)
+    }
+
+@router.post("/manual-data", status_code=201)
+def create_manual_weather_data(weather_data: schemas.WeatherDataCreate, db: Session = Depends(get_db)):
+    """
+    過去の気象データを手動で登録します。
+    """
+    # 同じ日付のデータが既に存在するかチェック
+    existing_data = crud.get_weather_data_by_date(db, weather_data.date.strftime('%Y-%m-%d'))
+    if existing_data:
+        raise HTTPException(status_code=400, detail=f"Weather data for {weather_data.date.strftime('%Y-%m-%d')} already exists")
+
+    db_weather = crud.create_weather_data(db=db, weather=weather_data)
+    return {"message": f"Successfully created weather data for {weather_data.date.strftime('%Y-%m-%d')}", "data": db_weather}
+
+@router.post("/bulk-manual-data", status_code=201)
+def create_bulk_manual_weather_data(weather_data_list: List[schemas.WeatherDataCreate], db: Session = Depends(get_db)):
+    """
+    過去の気象データを一括で手動登録します。
+    """
+    created_count = 0
+    skipped_count = 0
+    errors = []
+
+    for weather_data in weather_data_list:
+        try:
+            # 同じ日付のデータが既に存在するかチェック
+            existing_data = crud.get_weather_data_by_date(db, weather_data.date.strftime('%Y-%m-%d'))
+            if existing_data:
+                skipped_count += 1
+                continue
+
+            crud.create_weather_data(db=db, weather=weather_data)
+            created_count += 1
+
+        except Exception as e:
+            errors.append(f"Error for {weather_data.date.strftime('%Y-%m-%d')}: {str(e)}")
+
+    return {
+        "message": f"Bulk insert completed. Created: {created_count}, Skipped: {skipped_count}",
+        "created_count": created_count,
+        "skipped_count": skipped_count,
+        "errors": errors
+    }
+
+@router.delete("/cleanup", status_code=200)
+def cleanup_old_weather_data(days_to_keep: int = 7, db: Session = Depends(get_db)):
+    """
+    指定した日数より古い天気データを削除します。
+    Args:
+        days_to_keep: 保持する日数（デフォルト7日）
+    """
+    deleted_count = crud.delete_old_weather_data(db, days_to_keep=days_to_keep)
+    return {"message": f"Successfully deleted {deleted_count} weather data entries older than {days_to_keep} days."}

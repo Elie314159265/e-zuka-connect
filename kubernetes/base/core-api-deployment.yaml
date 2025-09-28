@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: core-api
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.3.5-analysis-fix
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20250928-auth-fix
         ports:
         - containerPort: 80
         startupProbe:
@@ -31,7 +31,17 @@ spec:
         - name: DEBUG_MODE
           value: "false"
         - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: "/var/secrets/google/key.json"
+          value: "/var/secrets/google/gcp-credentials.json"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: cloudsql-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cloudsql-secret
+              key: password
         envFrom:
         - configMapRef:
             name: app-config
@@ -39,7 +49,20 @@ spec:
         - name: google-cloud-key
           mountPath: /var/secrets/google
           readOnly: true
+      # Cloud SQL Proxy サイドカー
+      - name: cloudsql-proxy
+        image: gcr.io/cloudsql-docker/gce-proxy:1.33.2
+        command:
+          - "/cloud_sql_proxy"
+          - "-instances=your-gcp-project-id:us-central1:your-gcp-project-id-postgresql=tcp:5432"
+          - "-credential_file=/var/secrets/google/gcp-credentials.json"
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /var/secrets/google
+          readOnly: true
+        securityContext:
+          runAsNonRoot: true
       volumes:
       - name: google-cloud-key
         secret:
-          secretName: storage-sa-key
+          secretName: gcp-ocr-credentials

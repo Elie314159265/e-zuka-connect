@@ -54,3 +54,6 @@ docker-compose.override.yml
 
 # Kubernetes
 *.yaml.bak
+
+# CloudSQL
+cloud_sql_proxy

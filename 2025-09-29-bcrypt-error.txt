@@ -1,0 +1,125 @@
+# bcryptライブラリ互換性問題 デバッグ記録
+日付: 2025-09-28 (記録作成: 2025-09-29)
+問題: 一般ユーザーと事業者ユーザーのログインが不可能
+
+## 問題の概要
+- v1.3.5-analysis-fix: ログイン可能
+- v1.4.0-extended-weather以降: ログイン不可
+- エラー内容: bcrypt関連の依存関係問題
+
+## 調査手順
+
+### 1. 依存関係の確認
+- requirements.txt: passlib[bcrypt] のみ指定
+- bcryptのバージョンが自動的に最新版（5.0.0）にアップデート
+
+### 2. 環境間のバージョン比較
+**ローカル環境:**
+- bcrypt: 3.2.2 (bcrypt.__about__属性あり)
+- passlib: 1.7.4
+
+**本番環境（v1.3.5）:**
+- bcrypt: 4.3.0 (警告あり)
+- passlib: 1.7.4
+- 警告: `module 'bcrypt' has no attribute '__about__'`
+
+**新環境（v1.4.0+）:**
+- bcrypt: 5.0.0 (passlib非互換)
+- passlib: 1.7.4
+- エラー: 認証機能の動作不良
+
+### 3. 根本原因の特定
+- bcrypt 5.0.0でAPI構造が変更（__about__属性削除）
+- passlib 1.7.4がbcrypt 5.0.0のAPIに対応していない
+- バージョン固定なしによる自動アップデートが原因
+
+## 解決策
+
+### 修正内容
+requirements.txtに以下を追加:
+```
+bcrypt==4.0.1
+```
+
+### 理由
+- bcrypt 4.0.1とpasslib 1.7.4は完全互換
+- __about__属性が存在し、passlib側でエラーが発生しない
+- 既存のハッシュとの互換性も保持
+
+## 実装手順
+
+1. **依存関係修正**
+   ```bash
+   # requirements.txtにbcrypt==4.0.1を追加
+   ```
+
+2. **Dockerイメージ作成**
+   ```bash
+   docker build -t test-core-api-fixed .
+   docker tag test-core-api-fixed asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.4.1-bcrypt-fix
+   docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.4.1-bcrypt-fix
+   ```
+
+3. **デプロイメント更新**
+   ```bash
+   # kubernetes/base/core-api-deployment.yamlのイメージタグを更新
+   image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.4.1-bcrypt-fix
+   kubectl apply -f kubernetes/base/core-api-deployment.yaml
+   ```
+
+## 検証結果
+
+### 修正前（v1.4.0+）
+- bcrypt: 5.0.0
+- 認証機能: エラー
+- 警告メッセージ: あり
+
+### 修正後（v1.4.1-bcrypt-fix）
+- bcrypt: 4.0.1 ✅
+- passlib: 1.7.4 ✅
+- bcrypt.__about__: True ✅
+- 認証テスト: 成功 ✅
+- 警告メッセージ: なし ✅
+
+## ポッド更新状況
+
+```
+# 更新前
+core-api-6575c55b54-5gjjp (v1.3.5-analysis-fix)
+
+# 更新後
+core-api-bdd657d7c-bs5lq (v1.4.1-bcrypt-fix)
+```
+
+## 今後の対策
+
+1. **依存関係の明示的指定**
+   - 重要なライブラリはバージョン固定を検討
+   - 特にセキュリティ関連ライブラリは慎重に管理
+
+2. **テスト環境での事前検証**
+   - Dockerビルド時の依存関係変更チェック
+   - 認証機能の自動テスト追加
+
+3. **モニタリング強化**
+   - bcrypt関連の警告メッセージの監視
+   - 認証失敗率の追跡
+
+## 関連ファイル
+
+- services/core-api/requirements.txt
+- kubernetes/base/core-api-deployment.yaml
+- services/core-api/app/security/auth.py
+
+## 参考情報
+
+- bcrypt 5.0.0リリースノート: API破壊的変更
+- passlib 1.7.4互換性: bcrypt 4.x系まで対応
+- Cloud SQL Proxy設定: 問題なし（今回は無関係）
+
+## 解決確認
+
+✅ ログイン機能の復旧
+✅ 一般ユーザー・事業者ユーザー両方対応
+✅ 新機能（historical_weather等）も利用可能
+✅ 本番環境での安定動作確認
