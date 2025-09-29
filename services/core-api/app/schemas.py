@@ -406,6 +406,7 @@ class ProductCategory(ProductCategoryBase):
 class ProductBase(BaseModel):
     name: str
     description: Optional[str] = None
+    category_id: Optional[int] = None
     product_code: Optional[str] = None
     unit_price: int
     cost_price: Optional[int] = None

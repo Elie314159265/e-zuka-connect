@@ -11,13 +11,16 @@ router = APIRouter(prefix="/api/products", tags=["products"])
 
 @router.post("/categories", response_model=schemas.ProductCategory)
 def create_product_category(
-    category: schemas.ProductCategoryCreate,
+    category_data: schemas.ProductCategoryBase,
     db: Session = Depends(get_db),
     current_owner: models.StoreOwner = Depends(get_current_store_owner)
 ):
     """商品カテゴリを作成"""
-    # オーナーの店舗IDを設定
-    category.store_id = current_owner.store_id
+    # オーナーの店舗IDを含む新しいオブジェクトを作成
+    category = schemas.ProductCategoryCreate(
+        **category_data.model_dump(),
+        store_id=current_owner.store_id
+    )
     return crud.create_product_category(db=db, category=category)
 
 @router.get("/categories", response_model=List[schemas.ProductCategory])
@@ -97,28 +100,30 @@ def delete_product_category(
 
 @router.post("/", response_model=schemas.Product)
 def create_product(
-    product: schemas.ProductCreate,
+    product_data: schemas.ProductBase,
     db: Session = Depends(get_db),
     current_owner: models.StoreOwner = Depends(get_current_store_owner)
 ):
     """商品を作成"""
-    # オーナーの店舗IDを設定
-    product.store_id = current_owner.store_id
-
     # カテゴリが指定されている場合、店舗所有権を確認
-    if product.category_id:
-        category = crud.get_product_category(db=db, category_id=product.category_id)
+    if product_data.category_id:
+        category = crud.get_product_category(db=db, category_id=product_data.category_id)
         if not category or category.store_id != current_owner.store_id:
             raise HTTPException(status_code=400, detail="指定されたカテゴリが無効です")
 
     # 商品コードの重複確認
-    if product.product_code:
+    if product_data.product_code:
         existing = crud.get_product_by_code(
-            db=db, store_id=current_owner.store_id, product_code=product.product_code
+            db=db, store_id=current_owner.store_id, product_code=product_data.product_code
         )
         if existing:
             raise HTTPException(status_code=400, detail="商品コードが既に存在します")
 
+    # オーナーの店舗IDを含む新しいオブジェクトを作成
+    product = schemas.ProductCreate(
+        **product_data.model_dump(),
+        store_id=current_owner.store_id
+    )
     return crud.create_product(db=db, product=product)
 
 @router.get("/", response_model=List[schemas.Product])

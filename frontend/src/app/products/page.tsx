@@ -65,7 +65,7 @@ export default function ProductsPage() {
         if (!token) return;
 
         try {
-            let url = `${apiBaseUrl}/api/products`;
+            let url = `${apiBaseUrl}/api/products/`;
             const params = new URLSearchParams();
             if (selectedCategory) params.append('category_id', selectedCategory.toString());
             if (params.toString()) url += `?${params.toString()}`;

@@ -6,6 +6,7 @@ from .. import crud, models, schemas
 from ..database import get_db
 from .. import security
 from ..security import rls
+from ..security.auth import get_current_store_owner
 from ..security.password_validator import password_validator
 
 router = APIRouter(prefix="/api/stores", tags=["stores"])
@@ -172,34 +173,6 @@ def refresh_store_owner_token(
         "token_type": "bearer"
     }
 
-def get_current_store_owner(
-    token: str = Depends(security.oauth2_scheme),
-    db: Session = Depends(get_db)
-):
-    """
-    店舗オーナーの認証情報を取得
-    """
-    # JWTトークンをデコード
-    payload = security.decode_token(token)
-    email: str = payload.get("sub")
-    if email is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="無効なトークンです"
-        )
-    
-    # 店舗オーナーを取得
-    store_owner = crud.get_store_owner_by_email(db, email)
-    if store_owner is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="店舗オーナーが見つかりません"
-        )
-    
-    # RLSのセッションコンテキストを設定
-    rls.set_session_context(store_id=store_owner.store_id)
-    
-    return store_owner
 
 # 店舗オーナー用ダッシュボードエンドポイント
 @router.get("/dashboard/events", response_model=List[schemas.Event])

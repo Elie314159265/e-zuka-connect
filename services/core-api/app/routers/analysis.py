@@ -5,6 +5,7 @@ from typing import List
 from datetime import date, timedelta
 
 from .. import crud, schemas, security, models
+from ..security.auth import get_current_store_owner
 from ..database import get_db
 
 router = APIRouter(
@@ -20,35 +21,37 @@ class SalesByWeatherResponse(schemas.BaseModel):
 
 
 @router.get("/sales-by-weather", response_model=SalesByWeatherResponse)
-def get_sales_by_weather(db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+def get_sales_by_weather(db: Session = Depends(get_db), current_owner: models.StoreOwner = Depends(get_current_store_owner)):
     """
     天気ごとの売上分析データを取得します。
     晴れ（WMOコード 0-3）と雨（WMOコード 51以上）で分類します。
     """
-    if not current_user.is_owner:
-        raise HTTPException(status_code=403, detail="Not authorized for this operation.")
 
     # 晴れの日の売上合計
     sunny_sales_query = db.query(func.sum(models.Receipt.total_amount)).join(models.WeatherData, func.date(models.Receipt.receipt_date) == func.date(models.WeatherData.date)).filter(
-        models.WeatherData.weather_code <= 3
+        models.WeatherData.weather_code <= 3,
+        models.Receipt.store_id == current_owner.store_id
     )
     total_sunny_sales = sunny_sales_query.scalar() or 0
 
     # 晴れの日の日数
     sunny_days_query = db.query(func.count(func.distinct(func.date(models.Receipt.receipt_date)))).join(models.WeatherData, func.date(models.Receipt.receipt_date) == func.date(models.WeatherData.date)).filter(
-        models.WeatherData.weather_code <= 3
+        models.WeatherData.weather_code <= 3,
+        models.Receipt.store_id == current_owner.store_id
     )
     count_sunny_days = sunny_days_query.scalar() or 0
-    
+
     # 雨の日の売上合計
     rainy_sales_query = db.query(func.sum(models.Receipt.total_amount)).join(models.WeatherData, func.date(models.Receipt.receipt_date) == func.date(models.WeatherData.date)).filter(
-        models.WeatherData.weather_code >= 51
+        models.WeatherData.weather_code >= 51,
+        models.Receipt.store_id == current_owner.store_id
     )
     total_rainy_sales = rainy_sales_query.scalar() or 0
 
     # 雨の日の日数
     rainy_days_query = db.query(func.count(func.distinct(func.date(models.Receipt.receipt_date)))).join(models.WeatherData, func.date(models.Receipt.receipt_date) == func.date(models.WeatherData.date)).filter(
-        models.WeatherData.weather_code >= 51
+        models.WeatherData.weather_code >= 51,
+        models.Receipt.store_id == current_owner.store_id
     )
     count_rainy_days = rainy_days_query.scalar() or 0
 
@@ -64,15 +67,13 @@ def get_sales_by_weather(db: Session = Depends(get_db), current_user: models.Use
 
 @router.get("/daily-sales", response_model=List[schemas.DailySale])
 def get_daily_sales(
-    db: Session = Depends(get_db), 
-    current_user: models.User = Depends(security.get_current_user),
+    db: Session = Depends(get_db),
+    current_owner: models.StoreOwner = Depends(get_current_store_owner),
     days: int = 30
 ):
     """
     指定された日数分の日別売上データを取得します。
     """
-    if not current_user.is_owner:
-        raise HTTPException(status_code=403, detail="Not authorized for this operation.")
 
     start_date = date.today() - timedelta(days=days)
 
@@ -83,10 +84,11 @@ def get_daily_sales(
         models.WeatherData.temperature_max,
         models.WeatherData.temperature_min
     ).outerjoin(
-        models.WeatherData, 
+        models.WeatherData,
         func.cast(models.Receipt.receipt_date, Date) == func.cast(models.WeatherData.date, Date)
     ).filter(
-        func.cast(models.Receipt.receipt_date, Date) >= start_date
+        func.cast(models.Receipt.receipt_date, Date) >= start_date,
+        models.Receipt.store_id == current_owner.store_id
     ).group_by(
         func.cast(models.Receipt.receipt_date, Date),
         models.WeatherData.temperature_max,
@@ -108,18 +110,16 @@ def get_daily_sales(
     return result
 
 @router.get("/customer-demographics")
-def get_customer_demographics(db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
+def get_customer_demographics(db: Session = Depends(get_db), current_owner: models.StoreOwner = Depends(get_current_store_owner)):
     """
     レシートを投稿したユーザーの客層（年代、性別）を分析します。
     """
-    if not current_user.is_owner:
-        raise HTTPException(status_code=403, detail="Not authorized for this operation.")
 
     # このオーナーの店で買い物をしたユニークな顧客のIDリストを取得
     customer_ids = db.query(
         models.Receipt.user_id
     ).filter(
-        models.Receipt.supplier_name == current_user.full_name # 仮。店舗IDで紐づけるのが望ましい
+        models.Receipt.store_id == current_owner.store_id
     ).distinct().all()
     
     customer_id_list = [c[0] for c in customer_ids]

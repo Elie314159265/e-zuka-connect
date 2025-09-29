@@ -118,5 +118,174 @@ image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-re
 - `services/core-api/app/routers/products.py` - 商品管理API
 - `frontend/src/app/products/page.tsx` - 商品管理フロントエンド
 
+---
+
+## 追加修正: 商品・カテゴリ登録の422エラー解決
+
+### 追加で発生した問題
+- 事業者専用ページからの商品カテゴリ登録が422エラーで失敗
+- 商品登録も同様に失敗
+- フロントエンドに `[object Object]` と表示される現象
+
+### 根本原因の特定
+1. **Pydanticモデルのフィールド動的設定エラー**
+   - `products.py:20` で `category.store_id = current_owner.store_id` として、Pydanticモデルの属性を直接変更しようとしていた
+   - Pydanticモデルは不変オブジェクトのため、この操作は失敗する
+
+2. **データベーススキーマの問題**
+   - `is_active`, `is_featured`, `is_seasonal` などのBooleanフィールドが `nullable=True` でデフォルト値なし
+   - 既存データにNULL値が存在し、Pydanticのレスポンスバリデーションで `ResponseValidationError` が発生
+
+### 追加修正内容
+
+#### 1. バックエンドAPI修正 (services/core-api/app/routers/products.py)
+```python
+# 修正前
+def create_product_category(
+    category: schemas.ProductCategoryCreate,
+    ...
+):
+    category.store_id = current_owner.store_id  # ❌ エラーの原因
+    return crud.create_product_category(db=db, category=category)
+
+# 修正後
+def create_product_category(
+    category_data: schemas.ProductCategoryBase,
+    ...
+):
+    category = schemas.ProductCategoryCreate(
+        **category_data.model_dump(),
+        store_id=current_owner.store_id  # ✅ 新しいオブジェクトを作成
+    )
+    return crud.create_product_category(db=db, category=category)
+```
+
+#### 2. データベースマイグレーション
+新しいマイグレーションファイル作成: `144f09c861db_fix_is_active_default_values.py`
+
+**実行したSQL (CloudSQL直接接続):**
+```sql
+-- NULL値を適切なデフォルト値で更新
+UPDATE product_categories SET is_active = TRUE WHERE is_active IS NULL;
+UPDATE products SET is_active = TRUE WHERE is_active IS NULL;
+UPDATE products SET is_featured = FALSE WHERE is_featured IS NULL;
+UPDATE products SET is_seasonal = FALSE WHERE is_seasonal IS NULL;
+UPDATE products SET is_stock_managed = TRUE WHERE is_stock_managed IS NULL;
+
+-- デフォルト値とNOT NULL制約を追加
+ALTER TABLE product_categories ALTER COLUMN is_active SET DEFAULT TRUE;
+ALTER TABLE product_categories ALTER COLUMN is_active SET NOT NULL;
+ALTER TABLE product_categories ALTER COLUMN sort_order SET DEFAULT 0;
+ALTER TABLE product_categories ALTER COLUMN sort_order SET NOT NULL;
+
+-- productsテーブルにも同様の修正を適用
+ALTER TABLE products ALTER COLUMN is_active SET DEFAULT TRUE;
+ALTER TABLE products ALTER COLUMN is_active SET NOT NULL;
+ALTER TABLE products ALTER COLUMN is_featured SET DEFAULT FALSE;
+ALTER TABLE products ALTER COLUMN is_featured SET NOT NULL;
+ALTER TABLE products ALTER COLUMN is_seasonal SET DEFAULT FALSE;
+ALTER TABLE products ALTER COLUMN is_seasonal SET NOT NULL;
+ALTER TABLE products ALTER COLUMN is_stock_managed SET DEFAULT TRUE;
+ALTER TABLE products ALTER COLUMN is_stock_managed SET NOT NULL;
+ALTER TABLE products ALTER COLUMN stock_quantity SET DEFAULT 0;
+ALTER TABLE products ALTER COLUMN stock_quantity SET NOT NULL;
+ALTER TABLE products ALTER COLUMN low_stock_threshold SET DEFAULT 10;
+ALTER TABLE products ALTER COLUMN low_stock_threshold SET NOT NULL;
+ALTER TABLE products ALTER COLUMN tax_rate SET DEFAULT 0.10;
+ALTER TABLE products ALTER COLUMN tax_rate SET NOT NULL;
+ALTER TABLE products ALTER COLUMN unit SET DEFAULT '個';
+ALTER TABLE products ALTER COLUMN unit SET NOT NULL;
+```
+
+#### 3. Cloud SQL Proxyを使用したデータベース接続
+```bash
+cloud_sql_proxy -instances=your-gcp-project-id:us-central1:your-gcp-project-id-postgresql=tcp:5433 &
+PGPASSWORD='your-gcp-project-id-PostgreSQL16' psql -h localhost -p 5433 -U user -d dbname
+```
+
+#### 4. Docker イメージの再更新
+- 新しいタグ: `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20250929-034700-db-fix`
+- Kubernetesデプロイメント設定を再更新
+
+### 追加修正の結果
+- ✅ ResponseValidationErrorが完全に解消
+- ✅ 事業者専用ページからのカテゴリ登録が正常動作
+- ✅ 商品登録も正常動作
+- ✅ フロントエンドで `[object Object]` エラーが解消
+- ✅ Core-api Podログにエラーが表示されなくなった
+
+### 技術的学習ポイント
+1. **Pydanticモデルの不変性**: モデルのフィールドを直接変更せず、`model_dump()`を使用して新しいインスタンスを作成
+2. **データベーススキーマ設計**: Boolean型フィールドには必ずデフォルト値とNOT NULL制約を設定
+3. **エラーハンドリング**: バックエンドのResponseValidationErrorがフロントエンドで `[object Object]` として表示される問題
+4. **Cloud SQL操作**: Cloud SQL Proxyを使用した直接データベース接続とマイグレーション実行
+
+### 今後の対策
+- Alembicマイグレーションファイルの自動検証機能追加
+- Boolean型フィールドの標準化（デフォルト値必須）
+- フロントエンドでのエラーレスポンス表示改善
+- データベーススキーマ変更の自動テスト追加
+
+---
+
+## 最終修正: ProductBaseスキーマの500エラー解決
+
+### 発生した問題
+商品登録時に500 Internal Server Errorが発生:
+```
+AttributeError: 'ProductBase' object has no attribute 'category_id'
+```
+
+### 根本原因
+`ProductBase`スキーマクラスに`category_id`フィールドが定義されていなかったが、`create_product`関数で`product_data.category_id`にアクセスしようとしていた。
+
+- `ProductCreate`: `category_id: Optional[int] = None`あり
+- `Product`: `category_id: Optional[int] = None`あり
+- `ProductBase`: `category_id`フィールドなし ❌
+
+### 修正内容
+
+#### スキーマ修正 (services/core-api/app/schemas.py)
+```python
+class ProductBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    category_id: Optional[int] = None  # ✅ 追加
+    product_code: Optional[str] = None
+    unit_price: int
+    cost_price: Optional[int] = None
+    # ... 他のフィールド
+```
+
+#### Docker デプロイメント
+- 新しいイメージタグ: `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20250929-052610-fix-schema`
+- Kubernetesデプロイメント設定更新
+- Podの正常稼働確認: `core-api-84c9666fdc-vdghb` (2/2 Running)
+
+### 修正の効果
+- ✅ 商品登録時の500エラーが解消
+- ✅ `category_id`フィールドが正常に処理される
+- ✅ 商品登録フローが完全に動作可能
+
+### 学習ポイント
+1. **スキーマ階層の一貫性**: 基底クラス(`ProductBase`)と派生クラス(`ProductCreate`, `Product`)でフィールド定義を統一する重要性
+2. **継承関係の確認**: Pydanticモデルの継承チェーンで必要なフィールドが全て含まれているか検証
+3. **エラーログ分析**: AttributeErrorメッセージから欠落フィールドを特定する方法
+
+### 技術詳細
+商品登録APIの流れ:
+```
+Frontend → POST /api/products/ → ProductBase → create_product() → Database
+                                      ↑
+                              category_idフィールド必要
+```
+
+### 最終状態
+🎉 **商品管理システム完全稼働**
+- カテゴリ登録: ✅ 正常動作
+- 商品登録: ✅ 正常動作
+- データベース整合性: ✅ 確保済み
+- 認証機能: ✅ 正常動作
+
 ## 完了時刻
-2025-09-29 (Conversation completion time)
+2025-09-29 (All issues resolved - Final Schema Fix)

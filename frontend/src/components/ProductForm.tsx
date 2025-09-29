@@ -109,7 +109,7 @@ export default function ProductForm({ product, categories, onClose, onSave }: Pr
 
             const url = product
                 ? `${apiBaseUrl}/api/products/${product.id}`
-                : `${apiBaseUrl}/api/products`;
+                : `${apiBaseUrl}/api/products/`;
 
             const method = product ? 'PUT' : 'POST';
 
