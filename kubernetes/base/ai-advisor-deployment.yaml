@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-advisor-deployment
+  namespace: your-gcp-project-id
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-advisor
+  template:
+    metadata:
+      labels:
+        app: ai-advisor
+    spec:
+      containers:
+      - name: ai-advisor
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ai-advisor:2025-09-30-v1
+        ports:
+        - containerPort: 8002
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+        imagePullPolicy: IfNotPresent

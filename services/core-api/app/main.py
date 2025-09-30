@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import users, auth, receipts, weather, historical_weather, debug, analysis, gamification, stores, line_integration, products
+from .routers import users, auth, receipts, weather, historical_weather, debug, analysis, gamification, stores, line_integration, products, ai_advice
 from .security.rate_limit import setup_rate_limiting
 from .logging_config import setup_logging
 
@@ -49,6 +49,7 @@ app.include_router(gamification.router)
 app.include_router(stores.router)
 app.include_router(line_integration.router)
 app.include_router(products.router)
+app.include_router(ai_advice.router)
 
 # デバッグエンドポイントは開発環境またはDEBUG_MODEが有効な場合のみ
 if DEBUG_MODE or ENVIRONMENT in ["development", "testing"]:

@@ -277,17 +277,19 @@ export default function DashboardPage() {
                             <p className="text-center text-sm text-gray-600 mt-1">近日公開</p>
                         </motion.div>
 
-                        <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
-                        >
-                            <div className="flex items-center justify-center mb-2">
-                                <BarChart3 className="w-8 h-8 text-purple-600" />
-                            </div>
-                            <h3 className="text-center font-semibold text-gray-900">売上分析</h3>
-                            <p className="text-center text-sm text-gray-600 mt-1">詳細レポート</p>
-                        </motion.div>
+                        <Link href="/sales-analytics">
+                            <motion.div
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                            >
+                                <div className="flex items-center justify-center mb-2">
+                                    <BarChart3 className="w-8 h-8 text-purple-600" />
+                                </div>
+                                <h3 className="text-center font-semibold text-gray-900">売上分析</h3>
+                                <p className="text-center text-sm text-gray-600 mt-1">詳細レポート</p>
+                            </motion.div>
+                        </Link>
 
                         <motion.div
                             whileHover={{ scale: 1.05 }}

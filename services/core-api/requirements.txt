@@ -8,6 +8,7 @@ python-jose[cryptography]
 python-multipart
 google-cloud-storage
 requests
+httpx
 alembic
 email-validator
 slowapi

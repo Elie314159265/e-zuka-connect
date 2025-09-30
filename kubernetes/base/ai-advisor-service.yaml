@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-advisor-service
+  namespace: your-gcp-project-id
+spec:
+  selector:
+    app: ai-advisor
+  ports:
+    - protocol: TCP
+      port: 8002
+      targetPort: 8002
+  type: ClusterIP
