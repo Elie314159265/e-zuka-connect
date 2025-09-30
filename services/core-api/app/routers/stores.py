@@ -88,7 +88,14 @@ def register_store_owner(
     """
     # パスワード強度チェック
     password_validator.validate_or_raise(request["password"])
-    
+
+    # 電話番号の必須チェック
+    if not request.get("phone"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="電話番号は必須です"
+        )
+
     # 既存のメールアドレスチェック
     existing_owner = crud.get_store_owner_by_email(db, request["email"])
     if existing_owner:
@@ -96,15 +103,16 @@ def register_store_owner(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="このメールアドレスは既に登録されています"
         )
-    
-    # 店舗を作成
+
+    # 店舗を作成（電話番号を含める）
     store_data = schemas.StoreCreate(
         name=request["store_name"],
         business_type="一般店舗",
+        phone=request["phone"],
         email=request["email"]
     )
     store = crud.create_store(db, store_data)
-    
+
     # 店舗オーナーを作成
     store_owner_data = schemas.StoreOwnerCreate(
         email=request["email"],
@@ -112,7 +120,7 @@ def register_store_owner(
         full_name=request["full_name"],
         store_id=store.id
     )
-    
+
     return crud.create_store_owner(db, store_owner_data)
 
 @router.post("/owners/login", response_model=schemas.Token)

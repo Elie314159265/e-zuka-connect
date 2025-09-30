@@ -31,6 +31,7 @@ interface DailySale {
     total_sales: number;
     temperature_max?: number;
     temperature_min?: number;
+    is_forecast?: boolean;
 }
 
 interface Demographics {
@@ -38,11 +39,22 @@ interface Demographics {
     value: number;
 }
 
+interface ProductRanking {
+    name: string;
+    value: number;
+}
+
+interface ProductRankings {
+    quantity_ranking: ProductRanking[];
+    sales_ranking: ProductRanking[];
+}
+
 export default function DashboardPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [weatherAnalysis, setWeatherAnalysis] = useState<SalesByWeather | null>(null);
     const [dailySales, setDailySales] = useState<DailySale[]>([]);
     const [demographics, setDemographics] = useState<{ age: Demographics[], gender: Demographics[] }>({ age: [], gender: [] });
+    const [productRankings, setProductRankings] = useState<ProductRankings>({ quantity_ranking: [], sales_ranking: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const { token } = useAuthStore();
@@ -57,16 +69,17 @@ export default function DashboardPage() {
 
             try {
                 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://your-gcp-project-id.com';
-                
-                const [weatherRes, dailySalesRes, demographicsRes] = await Promise.all([
+
+                const [weatherRes, dailySalesRes, demographicsRes, rankingsRes] = await Promise.all([
                     fetch(`${apiBaseUrl}/api/analysis/sales-by-weather`, { headers: { 'Authorization': `Bearer ${token}` } }),
-                    fetch(`${apiBaseUrl}/api/analysis/daily-sales?days=7`, { headers: { 'Authorization': `Bearer ${token}` } }),
-                    fetch(`${apiBaseUrl}/api/analysis/customer-demographics`, { headers: { 'Authorization': `Bearer ${token}` } })
+                    fetch(`${apiBaseUrl}/api/analysis/daily-sales?days_back=7&days_forward=7`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                    fetch(`${apiBaseUrl}/api/analysis/customer-demographics`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                    fetch(`${apiBaseUrl}/api/analysis/product-rankings?limit=5`, { headers: { 'Authorization': `Bearer ${token}` } })
                 ]);
 
-                if (!weatherRes.ok || !dailySalesRes.ok || !demographicsRes.ok) {
+                if (!weatherRes.ok || !dailySalesRes.ok || !demographicsRes.ok || !rankingsRes.ok) {
                     // Find the first error response to show a more specific message
-                    const errorRes = [weatherRes, dailySalesRes, demographicsRes].find(res => !res.ok);
+                    const errorRes = [weatherRes, dailySalesRes, demographicsRes, rankingsRes].find(res => !res.ok);
                     const errorData = errorRes ? await errorRes.json() : { detail: 'データの取得に失敗しました。' };
                     throw new Error(errorData.detail);
                 }
@@ -74,13 +87,15 @@ export default function DashboardPage() {
                 const weatherData: SalesByWeather = await weatherRes.json();
                 const dailySalesData: DailySale[] = await dailySalesRes.json();
                 const demographicsData = await demographicsRes.json();
-                
+                const rankingsData: ProductRankings = await rankingsRes.json();
+
                 setWeatherAnalysis(weatherData);
                 setDailySales(dailySalesData.map(d => ({...d, date: new Date(d.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) })));
                 setDemographics({
                     age: demographicsData.age_demographics,
                     gender: demographicsData.gender_demographics
                 });
+                setProductRankings(rankingsData);
 
             } catch (err) {
                 setError(err instanceof Error ? err.message : '不明なエラーが発生しました。');
@@ -122,24 +137,77 @@ export default function DashboardPage() {
         if (isLoading) return <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center"><p className="text-gray-400">グラフを読み込み中...</p></div>;
         if (error) return <div className="h-64 bg-red-50 rounded-lg flex items-center justify-center text-red-600"><AlertTriangle className="w-8 h-8 mr-2" /><p>グラフの表示に失敗しました。</p></div>;
         if (dailySales.length > 0) {
+            // データをそのまま使用（バックエンドで今日のデータが適切に処理されている）
+            const allData = dailySales;
+
             return (
                 <ResponsiveContainer width="100%" height={350}>
-                    <LineChart data={dailySales} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                    <LineChart data={allData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" />
                         <YAxis yAxisId="sales" orientation="left" />
                         <YAxis yAxisId="temp" orientation="right" />
-                        <Tooltip 
+                        <Tooltip
                             formatter={(value, name) => {
-                                if (name === '売上') return [`¥${value?.toLocaleString()}`, name];
-                                if (name === '最高気温' || name === '最低気温') return [`${value}°C`, name];
+                                const nameStr = String(name);
+                                if (nameStr === '売上' || nameStr === '売上（実測）') return [`¥${value?.toLocaleString()}`, name];
+                                if (nameStr.includes('気温') || nameStr.includes('予測')) return [`${value}°C`, name];
                                 return [value, name];
                             }}
                         />
                         <Legend />
-                        <Line yAxisId="sales" type="monotone" dataKey="total_sales" name="売上" stroke="#8884d8" strokeWidth={3} />
-                        <Line yAxisId="temp" type="monotone" dataKey="temperature_max" name="最高気温" stroke="#ff7300" strokeWidth={2} strokeDasharray="5 5" />
-                        <Line yAxisId="temp" type="monotone" dataKey="temperature_min" name="最低気温" stroke="#82ca9d" strokeWidth={2} strokeDasharray="5 5" />
+                        {/* 実測データの売上（売上が0でなければ表示） */}
+                        <Line
+                            yAxisId="sales"
+                            type="monotone"
+                            dataKey={(d) => d.total_sales > 0 ? d.total_sales : null}
+                            name="売上（実測）"
+                            stroke="#8884d8"
+                            strokeWidth={3}
+                            connectNulls={false}
+                        />
+                        {/* 実測データの気温 */}
+                        <Line
+                            yAxisId="temp"
+                            type="monotone"
+                            dataKey={(d) => !d.is_forecast ? d.temperature_max : null}
+                            name="最高気温（実測）"
+                            stroke="#ff7300"
+                            strokeWidth={2}
+                            connectNulls={false}
+                        />
+                        <Line
+                            yAxisId="temp"
+                            type="monotone"
+                            dataKey={(d) => !d.is_forecast ? d.temperature_min : null}
+                            name="最低気温（実測）"
+                            stroke="#82ca9d"
+                            strokeWidth={2}
+                            connectNulls={false}
+                        />
+                        {/* 予測データの気温（点線） */}
+                        <Line
+                            yAxisId="temp"
+                            type="monotone"
+                            dataKey={(d) => d.is_forecast ? d.temperature_max : null}
+                            name="最高気温（予測）"
+                            stroke="#ff7300"
+                            strokeWidth={2}
+                            strokeDasharray="5 5"
+                            connectNulls={true}
+                            strokeOpacity={0.6}
+                        />
+                        <Line
+                            yAxisId="temp"
+                            type="monotone"
+                            dataKey={(d) => d.is_forecast ? d.temperature_min : null}
+                            name="最低気温（予測）"
+                            stroke="#82ca9d"
+                            strokeWidth={2}
+                            strokeDasharray="5 5"
+                            connectNulls={true}
+                            strokeOpacity={0.6}
+                        />
                     </LineChart>
                 </ResponsiveContainer>
             );
@@ -250,7 +318,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
                         <div className="bg-white p-6 rounded-xl shadow-md">
-                            <h3 className="font-bold text-xl mb-4">売上推移（直近7日間）</h3>
+                            <h3 className="font-bold text-xl mb-4">売上推移と気温予測（過去7日間 + 未来7日間）</h3>
                             <SalesChart />
                         </div>
                         <div className="grid md:grid-cols-2 gap-8">
@@ -267,7 +335,68 @@ export default function DashboardPage() {
                             </div>
                         </div>
                     </div>
-                    <div className="bg-white p-6 rounded-xl shadow-md"><h3 className="font-bold text-xl mb-4">人気商品ランキング</h3><ul className="space-y-4"><li className="flex items-center"><span className="text-lg font-bold text-yellow-500 mr-4">1.</span><span className="text-gray-700">特製からあげ弁当</span></li><li className="flex items-center"><span className="text-lg font-bold text-gray-400 mr-4">2.</span><span className="text-gray-700">日替わり定食</span></li><li className="flex items-center"><span className="text-lg font-bold text-orange-400 mr-4">3.</span><span className="text-gray-700">チキン南蛮</span></li><li className="flex items-center"><span className="text-lg font-bold text-gray-500 mr-4">4.</span><span className="text-gray-700">手作りコロッケ</span></li><li className="flex items-center"><span className="text-lg font-bold text-gray-500 mr-4">5.</span><span className="text-gray-700">かしわおにぎり</span></li></ul></div>
+                    <div className="bg-white p-6 rounded-xl shadow-md">
+                        <h3 className="font-bold text-xl mb-6">人気商品ランキング</h3>
+                        {isLoading ? (
+                            <div className="text-center text-gray-500 py-8">ランキング読み込み中...</div>
+                        ) : error ? (
+                            <div className="text-center text-red-600 py-8 flex items-center justify-center">
+                                <AlertTriangle className="w-6 h-6 mr-2" />
+                                <p>データ取得失敗</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                <div>
+                                    <h4 className="font-semibold text-lg mb-3 text-blue-600">購入数ランキング</h4>
+                                    {productRankings.quantity_ranking.length > 0 ? (
+                                        <ul className="space-y-3">
+                                            {productRankings.quantity_ranking.map((item, index) => (
+                                                <li key={index} className="flex items-center justify-between">
+                                                    <div className="flex items-center">
+                                                        <span className={`text-lg font-bold mr-4 ${
+                                                            index === 0 ? 'text-yellow-500' :
+                                                            index === 1 ? 'text-gray-400' :
+                                                            index === 2 ? 'text-orange-400' : 'text-gray-500'
+                                                        }`}>
+                                                            {index + 1}.
+                                                        </span>
+                                                        <span className="text-gray-700">{item.name}</span>
+                                                    </div>
+                                                    <span className="text-sm text-gray-500">{item.value}個</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-gray-500 text-sm">データがありません</p>
+                                    )}
+                                </div>
+                                <div className="border-t pt-4">
+                                    <h4 className="font-semibold text-lg mb-3 text-green-600">売上ランキング</h4>
+                                    {productRankings.sales_ranking.length > 0 ? (
+                                        <ul className="space-y-3">
+                                            {productRankings.sales_ranking.map((item, index) => (
+                                                <li key={index} className="flex items-center justify-between">
+                                                    <div className="flex items-center">
+                                                        <span className={`text-lg font-bold mr-4 ${
+                                                            index === 0 ? 'text-yellow-500' :
+                                                            index === 1 ? 'text-gray-400' :
+                                                            index === 2 ? 'text-orange-400' : 'text-gray-500'
+                                                        }`}>
+                                                            {index + 1}.
+                                                        </span>
+                                                        <span className="text-gray-700">{item.name}</span>
+                                                    </div>
+                                                    <span className="text-sm text-gray-500">¥{item.value.toLocaleString()}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="text-gray-500 text-sm">データがありません</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
             <AiAdviceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />

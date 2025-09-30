@@ -1,0 +1,578 @@
+# E-Zuka Connect - 実装タスクリスト
+作成日: 2025-09-30
+目的: CloudSQLの過去天気データと売上データを用いた事業者専用ページの解析結果表示機能の実装
+
+## 📋 現在の実装状況
+
+### ✅ 実装済み機能
+- データベースモデル
+  - HistoricalWeatherData (models.py:68-97): 過去の詳細気象データ
+  - Receipt (models.py:27-44): レシート・売上データ
+  - WeatherData (models.py:56-64): リアルタイム天気データ
+  - Store, StoreOwner (models.py:175-212): 事業者関連
+
+- バックエンドAPI
+  - /api/historical-weather/: 過去天気データの取得・保存（Open-Meteo API連携）
+  - /api/analysis/sales-by-weather: 天気別売上分析（晴れ vs 雨）
+  - /api/analysis/daily-sales: 日別売上データ（気温付き、直近N日間）
+  - /api/analysis/customer-demographics: 客層分析（年代・性別）
+
+- フロントエンド
+  - /dashboard (frontend/src/app/dashboard/page.tsx): 事業者ダッシュボード
+  - 売上推移グラフ（直近7日間、気温データ付き）
+  - 天気と売上の比較表示
+  - 客層分析の円グラフ
+
+### ⚠️ 現在の課題
+1. 分析API（analysis.py）はWeatherDataテーブルのみ使用
+2. HistoricalWeatherDataテーブルの詳細データ（降水量、風速、湿度など）が未活用
+3. 気温と売上の相関分析が未実装
+4. 長期トレンド分析（週次・月次）が未実装
+5. 予測機能が未実装
+
+================================================================================
+
+## 🎯 Phase 1: バックエンドAPI強化
+
+### タスク1.1: 天気と売上の相関分析API作成
+ファイル: services/core-api/app/routers/analysis.py
+新規エンドポイント: /api/analysis/weather-sales-correlation
+
+実装内容:
+- HistoricalWeatherDataとReceiptをJOINしてデータ取得
+- 以下の相関係数を計算:
+  - 気温（最高・最低・平均）と売上
+  - 降水量と売上
+  - 湿度と売上
+  - 風速と売上
+- 散布図用のデータポイントを返す
+- 期間指定パラメータ（days, weeks, months）
+
+レスポンス例:
+```json
+{
+  "correlations": {
+    "temperature_max": 0.65,
+    "temperature_mean": 0.58,
+    "precipitation_sum": -0.42,
+    "humidity_mean": -0.31
+  },
+  "scatter_data": [
+    {"date": "2025-09-01", "temperature_max": 28.5, "total_sales": 45000},
+    ...
+  ],
+  "period": "last_30_days",
+  "sample_size": 30
+}
+```
+
+スキーマ追加（schemas.py）:
+```python
+class WeatherSalesCorrelation(BaseModel):
+    correlations: Dict[str, float]
+    scatter_data: List[Dict[str, Any]]
+    period: str
+    sample_size: int
+```
+
+### タスク1.2: 月次トレンド分析API作成
+ファイル: services/core-api/app/routers/analysis.py
+新規エンドポイント: /api/analysis/monthly-trends
+
+実装内容:
+- 月次の売上集計
+- 月次の平均気象データ（HistoricalWeatherDataから）
+- 前月比、前年比の計算
+- 最大12ヶ月分のデータを返す
+
+レスポンス例:
+```json
+{
+  "trends": [
+    {
+      "month": "2025-09",
+      "total_sales": 1250000,
+      "avg_temperature": 26.3,
+      "avg_precipitation": 3.2,
+      "sales_growth_mom": 5.2,
+      "sales_growth_yoy": 12.8,
+      "transaction_count": 450
+    },
+    ...
+  ]
+}
+```
+
+スキーマ追加（schemas.py）:
+```python
+class MonthlyTrend(BaseModel):
+    month: str
+    total_sales: int
+    avg_temperature: Optional[float]
+    avg_precipitation: Optional[float]
+    sales_growth_mom: Optional[float]  # Month over Month
+    sales_growth_yoy: Optional[float]  # Year over Year
+    transaction_count: int
+
+class MonthlyTrendsResponse(BaseModel):
+    trends: List[MonthlyTrend]
+```
+
+### タスク1.3: 詳細天気別売上分析API改善
+ファイル: services/core-api/app/routers/analysis.py
+既存エンドポイント: /api/analysis/sales-by-weather
+
+改善内容:
+- WeatherDataからHistoricalWeatherDataに変更
+- 天気分類を拡張（晴れ、曇り、雨、雪、その他）
+- 降水量による細かい分類（小雨、大雨など）
+- 気温帯別の売上分析（〜15℃、15-20℃、20-25℃、25℃〜）
+
+レスポンス例:
+```json
+{
+  "by_weather_code": {
+    "clear": {"avg_sales": 52000, "days": 15},
+    "cloudy": {"avg_sales": 48000, "days": 8},
+    "rain": {"avg_sales": 38000, "days": 5},
+    "snow": {"avg_sales": 45000, "days": 2}
+  },
+  "by_temperature": {
+    "cold": {"avg_sales": 46000, "days": 5, "range": "< 15°C"},
+    "mild": {"avg_sales": 51000, "days": 12, "range": "15-20°C"},
+    "warm": {"avg_sales": 49000, "days": 8, "range": "20-25°C"},
+    "hot": {"avg_sales": 44000, "days": 5, "range": "> 25°C"}
+  }
+}
+```
+
+### タスク1.4: 週次売上サマリーAPI作成
+ファイル: services/core-api/app/routers/analysis.py
+新規エンドポイント: /api/analysis/weekly-summary
+
+実装内容:
+- 曜日別の売上平均
+- 週次の売上合計（直近12週間）
+- HistoricalWeatherDataとの連携
+
+レスポンス例:
+```json
+{
+  "by_day_of_week": {
+    "monday": {"avg_sales": 42000, "samples": 12},
+    "tuesday": {"avg_sales": 45000, "samples": 12},
+    ...
+  },
+  "weekly_totals": [
+    {"week_start": "2025-09-23", "total_sales": 320000, "avg_temperature": 24.5},
+    ...
+  ]
+}
+```
+
+================================================================================
+
+## 🎨 Phase 2: フロントエンド機能追加
+
+### タスク2.1: 相関分析グラフの追加
+ファイル: frontend/src/app/dashboard/page.tsx
+
+実装内容:
+- recharts の ScatterChart を使用
+- 気温 vs 売上の散布図
+- 降水量 vs 売上の散布図
+- 相関係数の表示
+- タブ切り替えで複数の指標を表示
+
+UIコンポーネント設計:
+```tsx
+<div className="bg-white p-6 rounded-xl shadow-md">
+  <h3 className="font-bold text-xl mb-4">天気と売上の相関分析</h3>
+  <Tabs>
+    <Tab label="気温">
+      <ScatterChart data={temperatureScatter}>
+        {/* 気温 vs 売上 */}
+      </ScatterChart>
+      <p>相関係数: {correlation.temperature}</p>
+    </Tab>
+    <Tab label="降水量">
+      <ScatterChart data={precipitationScatter}>
+        {/* 降水量 vs 売上 */}
+      </ScatterChart>
+      <p>相関係数: {correlation.precipitation}</p>
+    </Tab>
+  </Tabs>
+</div>
+```
+
+### タスク2.2: 月次トレンドグラフの追加
+ファイル: frontend/src/app/dashboard/page.tsx
+
+実装内容:
+- recharts の BarChart と LineChart を組み合わせ
+- 棒グラフ: 月次売上
+- 折れ線グラフ: 平均気温
+- 前月比・前年比の表示
+
+UIコンポーネント設計:
+```tsx
+<div className="bg-white p-6 rounded-xl shadow-md">
+  <h3 className="font-bold text-xl mb-4">月次売上トレンド</h3>
+  <ResponsiveContainer width="100%" height={350}>
+    <ComposedChart data={monthlyTrends}>
+      <CartesianGrid strokeDasharray="3 3" />
+      <XAxis dataKey="month" />
+      <YAxis yAxisId="sales" orientation="left" />
+      <YAxis yAxisId="temp" orientation="right" />
+      <Tooltip />
+      <Legend />
+      <Bar yAxisId="sales" dataKey="total_sales" fill="#8884d8" name="売上" />
+      <Line yAxisId="temp" type="monotone" dataKey="avg_temperature" stroke="#ff7300" name="平均気温" />
+    </ComposedChart>
+  </ResponsiveContainer>
+  <div className="mt-4 grid grid-cols-2 gap-4">
+    <div>
+      <p className="text-sm text-gray-500">前月比</p>
+      <p className="text-2xl font-bold">+5.2%</p>
+    </div>
+    <div>
+      <p className="text-sm text-gray-500">前年比</p>
+      <p className="text-2xl font-bold">+12.8%</p>
+    </div>
+  </div>
+</div>
+```
+
+### タスク2.3: 期間フィルター機能の追加
+ファイル: frontend/src/app/dashboard/page.tsx
+
+実装内容:
+- ドロップダウンメニューで期間選択
+- 選択肢: 直近7日間、1ヶ月、3ヶ月、6ヶ月、1年
+- 選択時にAPIを再リクエスト
+- 全グラフに適用
+
+UIコンポーネント設計:
+```tsx
+<div className="mb-6 flex justify-between items-center">
+  <h1 className="text-4xl font-bold">経営ダッシュボード</h1>
+  <div className="flex items-center space-x-4">
+    <select
+      value={selectedPeriod}
+      onChange={(e) => setSelectedPeriod(e.target.value)}
+      className="border rounded-lg px-4 py-2"
+    >
+      <option value="7">直近7日間</option>
+      <option value="30">1ヶ月</option>
+      <option value="90">3ヶ月</option>
+      <option value="180">6ヶ月</option>
+      <option value="365">1年</option>
+    </select>
+  </div>
+</div>
+```
+
+### タスク2.4: 週次サマリーカードの追加
+ファイル: frontend/src/app/dashboard/page.tsx
+
+実装内容:
+- 曜日別の売上平均を表示
+- 最も売上が多い曜日をハイライト
+- 週次売上推移のミニグラフ
+
+UIコンポーネント設計:
+```tsx
+<div className="bg-white p-6 rounded-xl shadow-md">
+  <h3 className="font-bold text-xl mb-4">曜日別売上分析</h3>
+  <div className="grid grid-cols-7 gap-2">
+    {daysOfWeek.map(day => (
+      <div key={day.name} className={`p-3 rounded-lg text-center ${day.isTop ? 'bg-blue-100' : 'bg-gray-50'}`}>
+        <p className="text-xs text-gray-500">{day.name}</p>
+        <p className="text-lg font-bold">¥{day.avg_sales.toLocaleString()}</p>
+      </div>
+    ))}
+  </div>
+</div>
+```
+
+### タスク2.5: TypeScript型定義の追加
+ファイル: frontend/src/types/analysis.ts（新規作成）
+
+実装内容:
+```typescript
+export interface WeatherSalesCorrelation {
+  correlations: {
+    temperature_max: number;
+    temperature_mean: number;
+    precipitation_sum: number;
+    humidity_mean: number;
+  };
+  scatter_data: Array<{
+    date: string;
+    temperature_max?: number;
+    precipitation_sum?: number;
+    total_sales: number;
+  }>;
+  period: string;
+  sample_size: number;
+}
+
+export interface MonthlyTrend {
+  month: string;
+  total_sales: number;
+  avg_temperature?: number;
+  avg_precipitation?: number;
+  sales_growth_mom?: number;
+  sales_growth_yoy?: number;
+  transaction_count: number;
+}
+
+export interface WeeklySummary {
+  by_day_of_week: {
+    [key: string]: {
+      avg_sales: number;
+      samples: number;
+    };
+  };
+  weekly_totals: Array<{
+    week_start: string;
+    total_sales: number;
+    avg_temperature?: number;
+  }>;
+}
+```
+
+================================================================================
+
+## 📊 Phase 3: データ整備
+
+### タスク3.1: 過去データの投入（手動実行）
+実行方法:
+```bash
+# 過去12週間分の天気データを取得
+curl -X POST "https://your-gcp-project-id.com/api/historical-weather/fetch-and-store?weeks_back=12" \
+  -H "Content-Type: application/json"
+
+# データが正しく保存されたか確認
+curl "https://your-gcp-project-id.com/api/historical-weather/?limit=100"
+
+# 特定期間のデータを確認
+curl "https://your-gcp-project-id.com/api/historical-weather/range?start_date=2025-07-01&end_date=2025-09-30"
+```
+
+確認ポイント:
+- 保存されたデータ件数
+- 各カラムにnullが多すぎないか
+- 日付の連続性
+
+### タスク3.2: CloudSQLデータ確認
+Cloud Shellで実行:
+```bash
+# CloudSQL Proxyを使用して接続
+gcloud sql connect your-gcp-project-id-db --user=postgres
+
+# データ確認クエリ
+SELECT COUNT(*) FROM historical_weather_data;
+SELECT date, temperature_max, precipitation_sum FROM historical_weather_data ORDER BY date DESC LIMIT 10;
+SELECT COUNT(*) FROM receipts;
+SELECT receipt_date, total_amount FROM receipts ORDER BY receipt_date DESC LIMIT 10;
+
+# 天気データとレシートの結合確認
+SELECT
+  DATE(r.receipt_date) as date,
+  COUNT(r.id) as receipt_count,
+  SUM(r.total_amount) as total_sales,
+  h.temperature_max,
+  h.precipitation_sum
+FROM receipts r
+LEFT JOIN historical_weather_data h ON DATE(r.receipt_date) = DATE(h.date)
+WHERE r.receipt_date >= NOW() - INTERVAL '30 days'
+GROUP BY DATE(r.receipt_date), h.temperature_max, h.precipitation_sum
+ORDER BY date DESC;
+```
+
+### タスク3.3: 定期実行の設定（Cloud Scheduler）
+ファイル: scripts/schedule-weather-update.sh（新規作成）
+
+実装内容:
+```bash
+#!/bin/bash
+# Cloud Schedulerで毎日実行するスクリプト
+
+# 過去1週間分の天気データを更新（既存データは上書き）
+curl -X POST "https://your-gcp-project-id.com/api/historical-weather/fetch-and-store?weeks_back=1" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${INTERNAL_API_KEY}"
+
+echo "Weather data update completed at $(date)"
+```
+
+Cloud Schedulerジョブ作成:
+```bash
+gcloud scheduler jobs create http weather-data-daily-update \
+  --schedule="0 2 * * *" \
+  --uri="https://your-gcp-project-id.com/api/historical-weather/fetch-and-store?weeks_back=1" \
+  --http-method=POST \
+  --time-zone="Asia/Tokyo" \
+  --description="毎日午前2時に過去天気データを更新"
+```
+
+### タスク3.4: データクリーンアップの設定
+定期的に古いデータを削除:
+```bash
+# 12週間より古いデータを削除（月1回実行）
+gcloud scheduler jobs create http weather-data-cleanup \
+  --schedule="0 3 1 * *" \
+  --uri="https://your-gcp-project-id.com/api/historical-weather/cleanup?older_than_weeks=12" \
+  --http-method=DELETE \
+  --time-zone="Asia/Tokyo" \
+  --description="毎月1日午前3時に古い天気データを削除"
+```
+
+================================================================================
+
+## 🧪 Phase 4: テストとバリデーション
+
+### タスク4.1: バックエンドAPIのテスト
+ファイル: services/core-api/tests/test_analysis.py（新規作成）
+
+テスト項目:
+- 相関分析APIのレスポンス形式確認
+- 空データの場合のエラーハンドリング
+- 日付範囲のバリデーション
+- 認証トークンの検証
+
+### タスク4.2: フロントエンドのテスト
+手動テスト項目:
+- グラフが正しくレンダリングされるか
+- 期間フィルターが動作するか
+- ローディング状態の表示
+- エラー時のフォールバック表示
+- モバイル表示の確認
+
+### タスク4.3: パフォーマンステスト
+確認項目:
+- 大量データ（365日分）のクエリ実行時間
+- フロントエンドのレンダリング速度
+- APIレスポンスタイム（目標: 500ms以内）
+
+インデックス最適化:
+```sql
+-- 必要に応じて追加
+CREATE INDEX idx_historical_weather_date ON historical_weather_data(date);
+CREATE INDEX idx_receipts_date_store ON receipts(receipt_date, store_id);
+```
+
+================================================================================
+
+## 📝 Phase 5: ドキュメント更新
+
+### タスク5.1: API仕様書更新
+ファイル: docs/api-specs.md（新規作成）
+
+記載内容:
+- 新規エンドポイントの詳細
+- リクエスト/レスポンス例
+- 認証方法
+- エラーコード一覧
+
+### タスク5.2: CLAUDE.md更新
+ファイル: CLAUDE.md
+
+追加内容:
+- 新しい分析APIの説明
+- データフローの図
+- トラブルシューティング
+
+### タスク5.3: 事業者向けマニュアル作成
+ファイル: docs/owner-dashboard-guide.md（新規作成）
+
+記載内容:
+- ダッシュボードの見方
+- 各グラフの解釈方法
+- 分析結果の活用方法
+
+================================================================================
+
+## 🚀 実装優先順位
+
+### 【最優先】Phase 1 + Phase 3.1-3.2
+1. データ確認と投入（タスク3.1, 3.2）
+2. 相関分析API（タスク1.1）
+3. 月次トレンドAPI（タスク1.2）
+
+理由: データがないと何も表示できないため、まずデータ整備を完了させる
+
+### 【次優先】Phase 2.1-2.2
+4. 相関分析グラフ追加（タスク2.1）
+5. 月次トレンドグラフ追加（タスク2.2）
+
+理由: ユーザーに価値を提供する最も重要な機能
+
+### 【その後】残りのタスク
+6. 詳細天気別売上API改善（タスク1.3）
+7. 週次サマリーAPI（タスク1.4）
+8. 期間フィルター機能（タスク2.3）
+9. 週次サマリーカード（タスク2.4）
+10. 定期実行設定（タスク3.3, 3.4）
+
+================================================================================
+
+## 📌 重要な注意事項
+
+1. **認証の確認**
+   - すべての分析APIは事業者認証が必要（get_current_store_owner）
+   - トークンの有効期限切れに注意
+
+2. **パフォーマンス**
+   - 大量データのJOINはインデックスを確認
+   - フロントエンドでのデータキャッシュを検討
+
+3. **エラーハンドリング**
+   - データが存在しない期間のエラー処理
+   - APIタイムアウト時のリトライ処理
+
+4. **データ品質**
+   - 天気データのnull値の扱い
+   - レシートデータの日付フォーマット統一
+
+5. **セキュリティ**
+   - API Keyの管理（環境変数）
+   - SQLインジェクション対策（ORMを使用）
+
+================================================================================
+
+## ✅ 完了チェックリスト
+
+Phase 1: バックエンドAPI強化
+- [ ] タスク1.1: 相関分析API実装
+- [ ] タスク1.2: 月次トレンドAPI実装
+- [ ] タスク1.3: 天気別売上API改善
+- [ ] タスク1.4: 週次サマリーAPI実装
+
+Phase 2: フロントエンド機能追加
+- [ ] タスク2.1: 相関分析グラフ追加
+- [ ] タスク2.2: 月次トレンドグラフ追加
+- [ ] タスク2.3: 期間フィルター機能追加
+- [ ] タスク2.4: 週次サマリーカード追加
+- [ ] タスク2.5: TypeScript型定義追加
+
+Phase 3: データ整備
+- [ ] タスク3.1: 過去データ投入実行
+- [ ] タスク3.2: CloudSQLデータ確認
+- [ ] タスク3.3: 定期実行設定
+- [ ] タスク3.4: データクリーンアップ設定
+
+Phase 4: テストとバリデーション
+- [ ] タスク4.1: バックエンドテスト
+- [ ] タスク4.2: フロントエンドテスト
+- [ ] タスク4.3: パフォーマンステスト
+
+Phase 5: ドキュメント更新
+- [ ] タスク5.1: API仕様書更新
+- [ ] タスク5.2: CLAUDE.md更新
+- [ ] タスク5.3: 事業者向けマニュアル作成
+
+================================================================================
+
+次のステップ: タスク3.1（データ確認と投入）から開始してください

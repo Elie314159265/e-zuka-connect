@@ -56,6 +56,13 @@ async def upload_receipt(
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Failed to call OCR service: {str(e)}")
 
+    # 2.5. 店舗をマッチングまたは作成
+    store = crud.find_or_create_store(
+        db,
+        supplier_name=ocr_result.get("supplier_name"),
+        supplier_phone=ocr_result.get("supplier_phone")
+    )
+
     # 3. 重複チェック
     point_engine = PointCalculationEngine(db)
     receipt_info = {
@@ -70,15 +77,16 @@ async def upload_receipt(
             detail="このレシートは既にアップロード済みです"
         )
     
-    # 4. 結果をDBに保存
+    # 4. 結果をDBに保存（店舗IDを含める）
     receipt_data = schemas.ReceiptCreate(
         supplier_name=ocr_result.get("supplier_name"),
         total_amount=ocr_result.get("total_amount"),
+        store_id=store.id,
         image_gcs_path=gcs_uri,
         ocr_raw_data=ocr_result,
         items=[schemas.ReceiptItemCreate(**item) for item in ocr_result.get("line_items", [])]
     )
-    
+
     db_receipt = crud.create_receipt(db=db, receipt=receipt_data, user_id=current_user.id)
     
     # 5. ポイント計算と付与

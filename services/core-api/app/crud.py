@@ -749,3 +749,70 @@ def get_seasonal_products(db: Session, store_id: int, limit: int = 10):
         models.Product.is_active == True,
         models.Product.is_seasonal == True
     ).order_by(models.Product.name).limit(limit).all()
+
+# ========== 店舗マッチングロジック ==========
+
+def normalize_phone_number(phone: str) -> str:
+    """
+    電話番号を正規化（ハイフン、スペース、括弧を削除）
+    例: 092-123-4567 -> 0921234567
+    """
+    if not phone:
+        return ""
+    import re
+    return re.sub(r'[\s\-\(\)]', '', phone)
+
+def find_or_create_store(db: Session, supplier_name: str, supplier_phone: str = None):
+    """
+    OCRで抽出した店名と電話番号から店舗を検索またはマッチング
+    1. 電話番号が一致する店舗を優先検索
+    2. 店名の部分一致で検索
+    3. 見つからなければ新規店舗を自動作成
+
+    Args:
+        supplier_name: OCRで抽出した店名
+        supplier_phone: OCRで抽出した電話番号（オプション）
+
+    Returns:
+        Store: マッチングまたは作成された店舗
+    """
+    # 1. 電話番号での検索（最優先）
+    if supplier_phone:
+        normalized_phone = normalize_phone_number(supplier_phone)
+        if normalized_phone:
+            # 電話番号の正規化一致検索
+            stores = db.query(models.Store).filter(
+                models.Store.phone.isnot(None)
+            ).all()
+
+            for store in stores:
+                if normalize_phone_number(store.phone) == normalized_phone:
+                    return store
+
+    # 2. 店名での部分一致検索
+    if supplier_name:
+        store = db.query(models.Store).filter(
+            models.Store.name.ilike(f"%{supplier_name}%")
+        ).first()
+
+        if store:
+            return store
+
+        # 逆パターン: DBの店名がOCR店名に含まれるか
+        stores = db.query(models.Store).all()
+        for store in stores:
+            if store.name and store.name in supplier_name:
+                return store
+
+    # 3. 見つからない場合は新規店舗を自動作成
+    new_store = models.Store(
+        name=supplier_name or "不明な店舗",
+        phone=supplier_phone,
+        business_type="未分類",
+        is_active=True
+    )
+    db.add(new_store)
+    db.commit()
+    db.refresh(new_store)
+
+    return new_store

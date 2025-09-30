@@ -131,6 +131,7 @@ class DailySale(BaseModel):
     total_sales: int
     temperature_max: Optional[float] = None
     temperature_min: Optional[float] = None
+    is_forecast: bool = False  # True if forecast data, False if historical/actual data
 
 # ========== ゲーミフィケーション関連スキーマ ==========
 

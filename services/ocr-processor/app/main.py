@@ -79,6 +79,7 @@ async def process_receipt_from_gcs(payload: GcsUri):
 
         total_amount = None
         supplier_name = None
+        supplier_phone = None
         line_items = []
 
         for entity in document.entities:
@@ -87,6 +88,8 @@ async def process_receipt_from_gcs(payload: GcsUri):
                 total_amount = clean_and_convert_amount(entity.mention_text)
             elif entity_type == "supplier_name":
                 supplier_name = entity.mention_text
+            elif entity_type == "supplier_phone":
+                supplier_phone = entity.mention_text
             elif entity_type == "line_item":
                 item_data = {}
                 for prop in entity.properties:
@@ -102,6 +105,7 @@ async def process_receipt_from_gcs(payload: GcsUri):
 
         return {
             "supplier_name": supplier_name,
+            "supplier_phone": supplier_phone,
             "total_amount": total_amount,
             "line_items": line_items,
         }

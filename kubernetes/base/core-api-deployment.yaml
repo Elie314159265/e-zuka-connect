@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: core-api
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20250929-052610-fix-schema
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-09-30-v6
         ports:
         - containerPort: 80
         startupProbe:

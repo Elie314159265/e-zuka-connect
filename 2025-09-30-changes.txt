@@ -1,0 +1,789 @@
+# 2025-09-30 変更内容まとめ
+
+## 概要
+レシートOCR機能に店舗マッチング機能を追加し、電話番号を利用したOCR精度向上を実装しました。
+
+## 実装内容
+
+### 1. バックエンド変更
+
+#### OCRプロセッサ (services/ocr-processor/app/main.py)
+- `supplier_phone` エンティティの抽出を追加
+- レスポンスに電話番号フィールドを追加
+- Document AIが抽出する電話番号情報を取得
+
+#### 店舗マッチングロジック (services/core-api/app/crud.py)
+新規関数を追加：
+- `normalize_phone_number()`: 電話番号正規化（ハイフン、スペース、括弧を削除）
+  - 例: "092-123-4567" → "0921234567"
+
+- `find_or_create_store()`: 店舗検索・自動作成ロジック
+  1. 電話番号の正規化一致で優先検索
+  2. 店名の部分一致で検索（双方向）
+  3. 見つからない場合は新規店舗を自動作成
+
+#### レシート登録処理 (services/core-api/app/routers/receipts.py)
+- OCR結果から店舗をマッチングまたは作成
+- `receipts.store_id` に店舗IDを自動関連付け
+- レシートと店舗の紐付けを実現
+
+#### 事業者登録 (services/core-api/app/routers/stores.py)
+- 電話番号を必須フィールドに変更
+- バリデーションエラーメッセージを追加
+- 店舗作成時に電話番号を含めるように修正
+
+### 2. フロントエンド変更
+
+#### 事業者登録ページ (frontend/src/app/register/owner/page.tsx)
+- `phone` ステート変数を追加
+- 電話番号入力フィールドを追加（tel型、プレースホルダー: "092-123-4567"）
+- API送信時に電話番号を含めるように変更
+
+### 3. データベース構造
+
+#### 既存テーブル活用
+- `stores` テーブル: 既に `phone` カラムが存在（今回活用）
+- `receipts` テーブル: 既に `store_id` カラムが存在（今回活用）
+
+#### データフロー
+```
+receipts.store_id → stores.id
+                     ├─ stores.name
+                     ├─ stores.phone
+                     └─ stores.business_type
+```
+
+### 4. デプロイ
+
+#### Docker イメージ
+全てのサービスを v1.1.0 タグでビルド・プッシュ：
+- `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:v1.1.0`
+- `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ocr-processor:v1.1.0`
+- `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:v1.1.0`
+
+#### Kubernetes デプロイメント
+更新したファイル：
+- `kubernetes/base/core-api-deployment.yaml`
+- `kubernetes/base/ocr-processor-deployment.yaml`
+- `kubernetes/base/frontend-deployment.yaml`
+
+全Podが正常にロールアウト完了。
+
+## メリット
+
+### OCR精度向上
+- 店名だけでなく電話番号も使って店舗を特定
+- 同じチェーン店の異なる店舗を区別可能
+  - 例: 「スターバックス 渋谷店」と「スターバックス 新宿店」
+
+### 自動店舗管理
+- レシートアップロード時に店舗を自動作成
+- 手動での店舗登録作業が不要
+- 未登録店舗も自動的にデータベースに追加
+
+### データ分析の向上
+- 店舗ごとの利用統計が取得可能
+- 事業者ごとの売上分析が可能
+- 地域や店舗タイプ別の分析が可能
+
+## クライアント側の変更
+**なし** - クライアントはこれまで通りレシート画像をアップロードするだけ
+
+## 技術的な重要ポイント
+
+### 1. 電話番号の正規化
+```python
+# ハイフン、スペース、括弧を削除して比較
+"092-123-4567" == "0921234567"
+"(092) 123-4567" == "0921234567"
+```
+
+### 2. 店舗マッチングの優先順位
+1. 電話番号の正規化一致（最優先）
+2. 店名の部分一致（LIKE検索）
+3. 新規店舗作成（見つからない場合）
+
+### 3. リレーション構造
+- レシートには `store_id` のみ保存
+- 電話番号は `stores` テーブルに保存
+- JOIN で店舗情報を取得可能
+
+### 4. 事業者登録時の必須項目
+- 店舗名
+- メールアドレス
+- **電話番号（新規追加）**
+- パスワード
+
+## 今後の拡張可能性
+
+### 店舗分析機能
+- 店舗ごとの売上ランキング
+- 店舗別の顧客訪問頻度
+- 地域別の消費動向分析
+
+### 店舗オーナー向け機能
+- 自店舗のレシート統計
+- 顧客の購買パターン分析
+- リピーター率の可視化
+
+### OCR精度改善
+- 住所情報の抽出
+- 営業時間の抽出
+- より詳細な店舗情報の取得
+
+## 注意事項
+
+### データベースマイグレーション
+- 今回はスキーマ変更なし（既存カラムを活用）
+- `stores.phone` は既存のカラム
+- `receipts.store_id` は既存のカラム
+
+### 互換性
+- 既存のレシートデータには影響なし
+- 過去のレシートは `store_id` が NULL のまま
+- 新規レシートから店舗IDが自動設定
+
+### パフォーマンス
+- 店舗検索は電話番号の正規化処理を含む
+- 全店舗を走査する可能性があるため、将来的にはインデックス追加を検討
+
+## デプロイ確認結果
+
+```
+NAME                                              READY   STATUS      RESTARTS   AGE
+core-api-647bdbd585-dbtns                         2/2     Running     0          2m55s
+frontend-deployment-8747c4495-srz7s               1/1     Running     0          2m50s
+ocr-processor-57f4b69b6f-vz9wr                    1/1     Running     0          2m52s
+```
+
+全てのPodが正常に稼働中。
+
+## ファイル変更リスト
+
+### 修正
+- services/ocr-processor/app/main.py
+- services/core-api/app/crud.py
+- services/core-api/app/routers/receipts.py
+- services/core-api/app/routers/stores.py
+- frontend/src/app/register/owner/page.tsx
+- kubernetes/base/core-api-deployment.yaml
+- kubernetes/base/ocr-processor-deployment.yaml
+- kubernetes/base/frontend-deployment.yaml
+
+### 新規作成
+- なし（既存機能の拡張）
+
+## 完了日時
+2025-09-30
+
+## 実装者メモ
+- Document AIの `supplier_phone` エンティティが確実に抽出されるかは、レシートの品質に依存
+- 電話番号が抽出できない場合でも、店名のみでマッチングを試行
+- 店舗の重複が発生する可能性があるため、将来的にはマージ機能の実装を検討
+
+---
+
+# 2025-09-30 追加変更: 事業者ダッシュボードの売上推移グラフ改善
+
+## 概要
+事業者専用ページの売上推移グラフを改善し、過去7日間の実測データと未来7日間の予測データを区別して表示できるようにしました。また、気象データをhistorical_weather_data（実測）とweather_data（予測）の2つのテーブルから適切に取得するように修正しました。
+
+## 問題点
+- 売上推移グラフに9月30日のデータしか表示されていなかった
+- 気象データの参照元が予測データ（weather_data）のみで、過去の実測データ（historical_weather_data）を使用していなかった
+- 実測値と予測値の区別がグラフ上で明確でなかった
+
+## 実装内容
+
+### 1. バックエンド API 変更
+
+#### 分析APIエンドポイント (services/core-api/app/routers/analysis.py)
+**主要な変更点:**
+
+1. **日付範囲の明確化**
+   - 実測データ: 昨日（9/29）から過去7日間 (9/23～9/29)
+   - 今日のデータ: 売上は実測、気温は予測値
+   - 予測データ: 明日（10/1）から未来7日間 (10/1～10/7)
+
+2. **データソースの使い分け**
+   ```python
+   # 過去7日間（実測）: historical_weather_data テーブル
+   historical_weather_data WHERE date >= 9/23 AND date <= 9/29
+
+   # 今日: weather_data テーブル（予測）
+   weather_data WHERE date = 9/30
+
+   # 未来7日間（予測）: weather_data テーブル
+   weather_data WHERE date >= 10/1 AND date <= 10/7
+   ```
+
+3. **売上がない日の表示**
+   - historical_weather_dataから全日付を取得
+   - 売上データを日付でマッピング
+   - 売上がない日は0として表示
+
+4. **is_forecastフラグの正確な設定**
+   - 過去（9/23～9/29）: `is_forecast=False`（実測）
+   - 今日（9/30）: `is_forecast=True`（気温は予測）
+   - 未来（10/1～10/7）: `is_forecast=True`（予測）
+
+#### スキーマ拡張 (services/core-api/app/schemas.py)
+```python
+class DailySale(BaseModel):
+    date: date
+    total_sales: int
+    temperature_max: Optional[float] = None
+    temperature_min: Optional[float] = None
+    is_forecast: bool = False  # 追加: 予測データかどうかを示すフラグ
+```
+
+### 2. フロントエンド変更
+
+#### ダッシュボードページ (frontend/src/app/dashboard/page.tsx)
+**主要な変更点:**
+
+1. **APIリクエストパラメータ変更**
+   ```typescript
+   // 変更前
+   /api/analysis/daily-sales?days=7
+
+   // 変更後
+   /api/analysis/daily-sales?days_back=7&days_forward=7
+   ```
+
+2. **グラフ表示ロジック改善**
+   - データ複製処理を削除（バックエンドで適切に処理）
+   - 売上表示条件を変更: `!d.is_forecast` → `d.total_sales > 0`
+   - これにより今日の売上も正しく表示される
+
+3. **実測と予測の視覚的区別**
+   ```typescript
+   // 実測データ: 実線
+   dataKey={(d) => !d.is_forecast ? d.temperature_max : null}
+   stroke="#ff7300"
+   strokeWidth={2}
+
+   // 予測データ: 点線 + 半透明
+   dataKey={(d) => d.is_forecast ? d.temperature_max : null}
+   stroke="#ff7300"
+   strokeDasharray="5 5"
+   strokeOpacity={0.6}
+   ```
+
+4. **凡例表示**
+   - 最高気温（実測）
+   - 最低気温（実測）
+   - 最高気温（予測）
+   - 最低気温（予測）
+   - 売上（実測）
+
+### 3. データベース調査結果
+
+#### historical_weather_data テーブル
+```
+9/23: 気温データあり
+9/24: 気温データあり
+9/25: 気温データあり
+9/26: 気温データあり
+9/27: 気温データあり
+9/28: 気温データあり
+9/29: 気温データNULL（Open-Meteo APIでまだ確定していない）
+```
+
+#### weather_data テーブル（予測）
+```
+9/30～10/7: 予測データあり
+```
+
+#### receipts データ
+```
+9/30: store_id=3のレシート（1,245円）
+9/28: store_id=NULLのレシート（表示されない）
+9/27: store_id=NULLのレシート（表示されない）
+```
+
+**注意**: 過去のレシートはstore_idがNULLのため、現在のstore_id=3の事業者には表示されない（意図通り）
+
+### 4. デプロイ
+
+#### Docker イメージ
+段階的にビルド・デプロイ:
+- `core-api:2025-09-30` → v2 → v3 → v4 → **v5（最終）**
+- `frontend:2025-09-30` → v2 → **v3（最終）**
+
+**最終デプロイ:**
+- `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-09-30-v5`
+- `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-09-30-v3`
+
+#### Kubernetes デプロイメント
+更新したファイル：
+- `kubernetes/base/core-api-deployment.yaml`
+- `kubernetes/base/frontend-deployment.yaml`
+
+### 5. トラブルシューティング履歴
+
+#### 問題1: 9/30のデータが表示されない
+**原因**: `< today`としていたため、当日が除外されていた
+**解決**: `<= today`に変更
+
+#### 問題2: 9/29が重複表示
+**原因**: フロントエンドで実測データの最後の点を予測データに複製していた
+**解決**: バックエンドで今日のデータを追加し、フロントエンドの複製処理を削除
+
+#### 問題3: 今日の売上が消える
+**原因**: `is_forecast=true`の場合、売上が非表示になっていた
+**解決**: 売上表示条件を`d.total_sales > 0`に変更
+
+#### 問題4: 9/29の気温データがNULL
+**原因**: Open-Meteo Archive APIで前日のデータがまだ確定していない
+**解決**: 待つ（1-2日後にcronジョブで自動更新される）
+
+#### 問題5: 過去の売上が表示されない
+**原因**: 過去のレシートはstore_id=NULLで、現在のオーナー（store_id=3）とマッチしない
+**解決**: 仕様として受け入れ（過去のデータは表示不要）
+
+## 技術的な重要ポイント
+
+### 1. データソースの使い分け
+```
+過去（実測） → historical_weather_data
+今日（混在） → 売上: receipts、気温: weather_data
+未来（予測） → weather_data
+```
+
+### 2. 日付の境界
+```python
+today = date.today()  # 9/30
+yesterday = today - timedelta(days=1)  # 9/29
+
+# 実測範囲
+historical_start = yesterday - 6  # 9/23
+historical_end = yesterday  # 9/29
+
+# 予測範囲
+forecast_start = today + 1  # 10/1
+forecast_end = today + 7  # 10/7
+```
+
+### 3. データの結合ロジック
+```python
+# 1. historical_weather_dataから全日付取得
+# 2. receiptsから売上を日付でグループ化
+# 3. 日付ごとに売上をマッピング
+# 4. 今日のデータを追加（売上 + 予測気温）
+# 5. 予測データを追加
+```
+
+### 4. フロントエンドの条件分岐
+```typescript
+// 売上: 金額が0より大きければ表示
+dataKey={(d) => d.total_sales > 0 ? d.total_sales : null}
+
+// 実測気温: is_forecast=falseの場合のみ
+dataKey={(d) => !d.is_forecast ? d.temperature_max : null}
+
+// 予測気温: is_forecast=trueの場合のみ
+dataKey={(d) => d.is_forecast ? d.temperature_max : null}
+```
+
+## メリット
+
+### 1. データの正確性向上
+- 実測データと予測データを明確に区別
+- 適切なデータソースから取得
+
+### 2. ユーザー体験の改善
+- 過去7日間の実績と未来7日間の予測を同時に表示
+- 点線で予測データを視覚的に区別
+- 売上データも含めた総合的な分析が可能
+
+### 3. 拡張性
+- 日数のパラメータ（days_back, days_forward）で柔軟に期間を変更可能
+- 他の気象データ（湿度、降水量など）も同様に追加可能
+
+## 今後の改善予定
+
+### 1. 9/29の気象データ
+- Open-Meteo APIでデータが確定次第、自動更新される（cronジョブ）
+- 通常1-2日で確定
+
+### 2. historical weather cronジョブ
+- スケジュール: 毎日17:00（UTC）
+- 処理内容: 過去8週間の気象データを取得・更新
+- 手動実行も可能: `kubectl create job --from=cronjob/historical-weather-fetch-cronjob`
+
+### 3. データ品質
+- store_idの適切な設定が重要
+- 新規レシートは自動的にstore_idが設定される
+- 過去のレシートはマイグレーション不要（表示不要）
+
+## ファイル変更リスト
+
+### 修正
+- services/core-api/app/routers/analysis.py（大幅改修）
+- services/core-api/app/schemas.py（DailySaleにis_forecastフィールド追加）
+- frontend/src/app/dashboard/page.tsx（グラフ表示ロジック改善）
+- kubernetes/base/core-api-deployment.yaml（イメージバージョン更新）
+- kubernetes/base/frontend-deployment.yaml（イメージバージョン更新）
+
+### 新規作成
+- なし
+
+## デプロイ確認結果
+
+```
+NAME                                    READY   STATUS    RESTARTS   AGE
+core-api-56d9d57c58-5jlgm              2/2     Running   0          11m
+frontend-deployment-77b8b9bb8-w5drr    1/1     Running   0          5m
+```
+
+全てのPodが正常に稼働中。
+
+## 完了日時
+2025-09-30（午後）
+
+## 実装者メモ
+- Open-Meteo Archive APIは前日のデータが確定するまで1-2日かかる
+- 今日の気温は予測値として扱うのが正確
+- 売上データの表示条件を`total_sales > 0`にすることで、is_forecastフラグに関係なく実売上を表示
+- store_idがNULLの過去レシートは意図的に表示しない設計
+- グラフの実線/点線の使い分けで実測と予測を直感的に区別可能
+
+---
+
+# 2025-09-30 追加変更: 事業者ダッシュボードに商品ランキング機能を実装
+
+## 概要
+事業者専用ダッシュボードの「人気商品ランキング」をモックデータから実データに変更し、CloudSQLのレシートデータを解析して購入数ランキングと売上ランキングを表示する機能を実装しました。
+
+## 問題点
+- ダッシュボードの人気商品ランキングがハードコードされたモックデータだった
+- 実際のレシートデータが活用されていなかった
+- 店舗ごとの商品分析ができなかった
+
+## 実装内容
+
+### 1. バックエンド API 変更
+
+#### 新規エンドポイント追加 (services/core-api/app/routers/analysis.py)
+
+**`GET /api/analysis/product-rankings`**
+
+パラメータ:
+- `limit`: 表示件数（デフォルト: 5）
+
+レスポンス:
+```json
+{
+  "quantity_ranking": [
+    {"name": "商品名", "value": 購入個数},
+    ...
+  ],
+  "sales_ranking": [
+    {"name": "商品名", "value": 売上金額},
+    ...
+  ]
+}
+```
+
+**実装ロジック:**
+
+1. **購入数ランキング**
+```python
+# receipt_itemsテーブルから商品descriptionごとに個数を集計
+SELECT
+  description,
+  COUNT(id) as quantity
+FROM receipt_items
+JOIN receipts ON receipt_items.receipt_id = receipts.id
+WHERE receipts.store_id = current_owner.store_id
+  AND description IS NOT NULL
+  AND description != ''
+GROUP BY description
+ORDER BY COUNT(id) DESC
+LIMIT 5
+```
+
+2. **売上ランキング**
+```python
+# receipt_itemsテーブルから商品descriptionごとに金額を合計
+SELECT
+  description,
+  SUM(amount) as total_sales
+FROM receipt_items
+JOIN receipts ON receipt_items.receipt_id = receipts.id
+WHERE receipts.store_id = current_owner.store_id
+  AND description IS NOT NULL
+  AND description != ''
+  AND amount IS NOT NULL
+GROUP BY description
+ORDER BY SUM(amount) DESC
+LIMIT 5
+```
+
+**認証:**
+- `get_current_store_owner`を使用して事業者認証
+- ログイン中の事業者のstore_idに紐づくデータのみ取得
+
+### 2. フロントエンド変更
+
+#### ダッシュボードページ (frontend/src/app/dashboard/page.tsx)
+
+**主要な変更点:**
+
+1. **型定義の追加**
+```typescript
+interface ProductRanking {
+    name: string;
+    value: number;
+}
+
+interface ProductRankings {
+    quantity_ranking: ProductRanking[];
+    sales_ranking: ProductRanking[];
+}
+```
+
+2. **ステート管理**
+```typescript
+const [productRankings, setProductRankings] = useState<ProductRankings>({
+    quantity_ranking: [],
+    sales_ranking: []
+});
+```
+
+3. **APIリクエスト追加**
+```typescript
+const rankingsRes = await fetch(
+    `${apiBaseUrl}/api/analysis/product-rankings?limit=5`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+);
+const rankingsData = await rankingsRes.json();
+setProductRankings(rankingsData);
+```
+
+4. **モックデータの削除と実データ表示**
+   - ハードコードされた商品リストを削除
+   - APIから取得した実データを表示
+   - 購入数ランキングと売上ランキングを分けて表示
+
+5. **UI改善**
+   - 購入数と売上を別セクションに分離
+   - 順位に応じた色分け（1位:金、2位:銀、3位:銅）
+   - 購入数には「個」、売上には「¥」を付けて表示
+   - ローディング状態とエラー処理を実装
+
+**表示レイアウト:**
+```
+人気商品ランキング
+├─ 購入数ランキング
+│  ├─ 1. 商品名A  (5個)
+│  ├─ 2. 商品名B  (3個)
+│  └─ ...
+└─ 売上ランキング
+   ├─ 1. 商品名C  (¥1,500)
+   ├─ 2. 商品名D  (¥1,200)
+   └─ ...
+```
+
+### 3. データベース調査結果
+
+#### CloudSQL接続確認
+```bash
+./cloud_sql_proxy -instances=your-gcp-project-id:us-central1:your-gcp-project-id-postgresql=tcp:5433 &
+PGPASSWORD='***' psql -h localhost -p 5433 -U user -d dbname
+```
+
+#### receipt_items テーブル構造
+```sql
+ id          | integer
+ receipt_id  | integer (FK → receipts.id)
+ description | character varying
+ amount      | integer
+```
+
+#### 実データ確認結果（store_id=3）
+**購入数ランキング:**
+```
+1. Tベーグル プレーン (1個)
+2. Tふわとろ生ドーナツ (1個)
+3. T焼きいもフレンチ (1個)
+...
+```
+
+**売上ランキング:**
+```
+1. T焼きいもフレンチ (¥280)
+2. Tふわとろ生ドーナツ (¥240)
+3. Tベーグル プレーン (¥230)
+...
+```
+
+### 4. デプロイ
+
+#### Docker イメージ
+**CoreAPI:**
+- ビルド: `core-api:2025-09-30-v6`
+- プッシュ: `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-09-30-v6`
+
+**Frontend:**
+- ビルド: `frontend:2025-09-30-v4` → `v5`（絵文字削除版）
+- プッシュ: `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-09-30-v5`
+
+#### Kubernetes デプロイメント
+更新したファイル：
+- `kubernetes/base/core-api-deployment.yaml`（v5 → v6）
+- `kubernetes/base/frontend-deployment.yaml`（v3 → v4 → v5）
+
+デプロイコマンド:
+```bash
+kubectl apply -f kubernetes/base/core-api-deployment.yaml
+kubectl apply -f kubernetes/base/frontend-deployment.yaml
+```
+
+#### デプロイ確認結果
+```
+NAME                                   READY   STATUS    RESTARTS   AGE
+core-api-5b6c887b67-pbfhw              2/2     Running   0          Running
+frontend-deployment-5587b88d8b-869nc   1/1     Running   0          Running
+```
+
+全てのPodが正常に稼働中。
+
+### 5. UIの微調整
+
+#### 絵文字削除対応
+- 初回デプロイ（v4）: "📊 購入数ランキング"、"💰 売上ランキング"
+- 修正版（v5）: 絵文字を削除してシンプルに
+  - "購入数ランキング"
+  - "売上ランキング"
+
+## 技術的な重要ポイント
+
+### 1. データソースの構造
+```
+receipts (店舗ID, レシート日付, 合計金額)
+  ↓ receipt_id
+receipt_items (商品名, 金額)
+```
+
+### 2. 集計クエリのポイント
+- **JOIN**: receipt_itemsとreceiptsをreceipt_idで結合
+- **WHERE条件**:
+  - `store_id = current_owner.store_id`（店舗フィルタ）
+  - `description IS NOT NULL AND != ''`（空データ除外）
+  - `amount IS NOT NULL`（売上ランキングのみ）
+- **GROUP BY**: `description`で商品ごとに集計
+- **ORDER BY**: `COUNT(id) DESC`または`SUM(amount) DESC`
+- **LIMIT**: デフォルト5件
+
+### 3. 認証とアクセス制御
+- JWTトークンによる事業者認証
+- `get_current_store_owner`で現在のオーナー情報を取得
+- 自分の店舗（`store_id`）のデータのみアクセス可能
+- マルチテナント対応
+
+### 4. フロントエンドの状態管理
+```typescript
+// 初期状態
+{ quantity_ranking: [], sales_ranking: [] }
+
+// ローディング中
+isLoading = true
+
+// データ取得成功
+productRankings = { quantity_ranking: [...], sales_ranking: [...] }
+
+// エラー発生
+error = "エラーメッセージ"
+```
+
+## メリット
+
+### 1. リアルタイムデータ分析
+- レシートアップロード直後から反映
+- 最新の人気商品を常に把握可能
+- 時期や季節ごとのトレンドを追跡
+
+### 2. 意思決定のサポート
+- 売れ筋商品の特定
+- 在庫管理の最適化
+- 販促戦略の立案
+
+### 3. データの信頼性
+- モックデータから実データへ
+- 店舗ごとの正確な統計
+- トランザクション単位での集計
+
+### 4. 拡張性
+- 期間指定（過去30日間、今月など）
+- カテゴリー別ランキング
+- 時間帯別分析
+- 顧客属性別分析
+
+## 今後の改善予定
+
+### 1. 期間フィルタ機能
+```python
+# 過去30日間のランキング
+?days_back=30
+
+# 特定期間のランキング
+?start_date=2025-09-01&end_date=2025-09-30
+```
+
+### 2. カテゴリー別ランキング
+- 商品カテゴリーの導入
+- カテゴリー別TOP5表示
+- カテゴリー横断比較
+
+### 3. トレンド分析
+- 前週比、前月比の表示
+- 急上昇商品のハイライト
+- 季節性の分析
+
+### 4. 商品詳細分析
+- 商品クリックで詳細ページへ
+- 購入時間帯の分布
+- 顧客セグメント別の人気度
+
+### 5. データ品質向上
+- OCR精度の向上による商品名の正規化
+- 同一商品の表記ゆれ対応
+- 商品マスタとの紐付け
+
+## 注意事項
+
+### データの正確性
+- OCRで抽出された商品名（description）に依存
+- 表記ゆれがある場合は別商品として集計される
+  - 例: "コーヒー" と "珈琲" は別扱い
+
+### パフォーマンス
+- 全レシート・全商品を集計するため、データ量が増えると処理時間が増加
+- 将来的にはインデックスの追加やキャッシュの導入を検討
+
+### 互換性
+- store_idがNULLの古いレシートは集計に含まれない
+- 新規レシートから自動的に集計対象となる
+
+## ファイル変更リスト
+
+### 修正
+- services/core-api/app/routers/analysis.py（新規エンドポイント追加）
+- frontend/src/app/dashboard/page.tsx（ランキング表示実装）
+- kubernetes/base/core-api-deployment.yaml（v5→v6）
+- kubernetes/base/frontend-deployment.yaml（v3→v5）
+
+### 新規作成
+- なし
+
+## 完了日時
+2025-09-30（夕方）
+
+## 実装者メモ
+- receipt_itemsテーブルのdescriptionフィールドをそのまま使用
+- 商品名の正規化は今後の課題
+- 購入数ランキングと売上ランキングは異なる場合がある（単価が異なるため）
+- 事業者ごとのデータ分離が適切に機能している
+- 絵文字の使用は最終的に削除してシンプルなUIに統一

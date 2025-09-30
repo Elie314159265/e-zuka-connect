@@ -30,6 +30,7 @@ const AuthPageLayout = ({ children }: { children: React.ReactNode }) => (
 export default function OwnerRegisterPage() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -53,11 +54,12 @@ export default function OwnerRegisterPage() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ 
-                    email, 
-                    password, 
+                body: JSON.stringify({
+                    email,
+                    password,
                     full_name: name,
-                    store_name: name // 店舗名として使用
+                    store_name: name, // 店舗名として使用
+                    phone
                 }),
             });
 
@@ -104,6 +106,10 @@ export default function OwnerRegisterPage() {
                 <div className="mb-4">
                     <label className="block text-gray-700 text-sm font-bold mb-2">メールアドレス</label>
                     <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="email@example.com" required />
+                </div>
+                <div className="mb-4">
+                    <label className="block text-gray-700 text-sm font-bold mb-2">電話番号</label>
+                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="shadow-sm appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="092-123-4567" required />
                 </div>
                 <div className="mb-6">
                     <label className="block text-gray-700 text-sm font-bold mb-2">パスワード</label>
