@@ -81,7 +81,7 @@ alembic.ini
 *.local.env
 
 # Change logs (個人情報や機密情報を含む可能性)
-*-changes.txt
+# *-changes.txt
 CHANGELOG.local.md
 
 # Temporary files

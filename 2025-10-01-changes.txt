@@ -1,0 +1,118 @@
+# 2025-10-01 変更履歴
+
+## 1. HSTS（HTTP Strict Transport Security）化の実装
+
+### 変更ファイル
+- `kubernetes/base/frontend-config.yaml`
+- `kubernetes/overlays/production/ingress.yaml` (※使用されていない)
+
+### 実装内容
+
+#### FrontendConfig設定
+- HTTPからHTTPSへの自動リダイレクトを有効化
+  - `redirectToHttps.enabled: true`
+  - リダイレクトコード: 301 (MOVED_PERMANENTLY_DEFAULT)
+- SSL/TLSポリシーを強化
+  - `sslPolicy: "modern-ssl-policy"`
+
+### 重要な注意点
+1. **FrontendConfigの制約**
+   - GKE FrontendConfig (networking.gke.io/v1beta1) では `spec.headers` フィールドがサポートされていない
+   - HSTSヘッダーは直接FrontendConfigでは設定できない
+   - サポートされるフィールド: `redirectToHttps`, `sslPolicy` のみ
+
+2. **使用中の設定ファイル**
+   - 実際に使用: `kubernetes/base/ingress.yaml`
+   - 未使用: `kubernetes/overlays/production/ingress.yaml`
+   - base/ingress.yamlはFrontendConfigを参照する設定済み
+     (`networking.gke.io/v1beta1.FrontendConfig: "http-to-https-redirect"`)
+
+3. **デプロイ方法**
+   ```bash
+   kubectl apply -f kubernetes/base/frontend-config.yaml
+   ```
+   - Ingress自体は変更不要（FrontendConfigの参照設定が既にあるため）
+
+### セキュリティ効果
+- すべてのHTTPアクセスが自動的にHTTPSへリダイレクト
+- modern-ssl-policyによる強固なTLS暗号化
+- 設定反映には数分かかる場合がある
+
+---
+
+## 2. トップページUIの変更
+
+### 変更ファイル
+- `frontend/src/app/page.tsx`
+
+### 変更内容
+- 「経営ダッシュボード」ボタンのリンク先を変更
+  - 変更前: `/dashboard`
+  - 変更後: `/login/owner` (事業者ログインページ)
+
+### 変更理由
+- 事業者は先にログインしてからダッシュボードにアクセスすべきフローに修正
+
+---
+
+## 3. フロントエンドのDockerイメージ更新
+
+### ビルド・デプロイ情報
+- **新しいイメージタグ**: `2025-10-01-v1`
+- **前回のタグ**: `2025-09-30-v9`
+- **レジストリ**: `asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend`
+
+### 実行コマンド
+```bash
+# 1. Dockerイメージビルド
+cd /home/souxiasatoru/your-gcp-project-id/frontend
+docker build -t asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-10-01-v1 \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=https://your-gcp-project-id.com .
+
+# 2. Artifact Registryへプッシュ
+docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-10-01-v1
+
+# 3. デプロイメント設定更新
+# kubernetes/base/frontend-deployment.yamlのimageタグを更新
+
+# 4. クラスターへ適用
+kubectl apply -f kubernetes/base/frontend-deployment.yaml
+
+# 5. ロールアウト確認
+kubectl rollout status deployment/frontend-deployment -n your-gcp-project-id
+```
+
+### 変更ファイル
+- `kubernetes/base/frontend-deployment.yaml`
+  - imageタグを `2025-09-30-v9` → `2025-10-01-v1` に更新
+
+### デプロイ結果
+- ✅ ビルド成功
+- ✅ プッシュ成功
+- ✅ デプロイメント成功
+- ✅ ロールアウト完了
+
+---
+
+## まとめ
+
+### 今回の主要な変更
+1. **セキュリティ強化**: HTTPS強制化（HTTPSリダイレクト + modern SSL policy）
+2. **UX改善**: 事業者向けフローの改善（ログイン画面への誘導）
+3. **デプロイ**: 上記変更を含む新しいフロントエンドイメージのデプロイ
+
+### 次回の改善検討事項
+- NGINX Ingressを使用する場合、HSTSヘッダーの詳細設定が可能
+  - `nginx.ingress.kubernetes.io/hsts: "true"`
+  - `nginx.ingress.kubernetes.io/hsts-max-age: "31536000"`
+  - `nginx.ingress.kubernetes.io/hsts-include-subdomains: "true"`
+  - `nginx.ingress.kubernetes.io/hsts-preload: "true"`
+- 現在はGKE IngressとFrontendConfigを使用しているため、上記設定は未適用
+
+### 検証方法
+```bash
+# HTTPSリダイレクト確認
+curl -I http://your-gcp-project-id.com
+
+# 期待される結果: 301 Moved Permanently + Location: https://...
+```
