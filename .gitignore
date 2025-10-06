@@ -57,3 +57,38 @@ docker-compose.override.yml
 
 # CloudSQL
 cloud_sql_proxy
+
+# Kubernetes Secrets (機密情報を含むファイル)
+kubernetes/base/*-secret.yaml
+kubernetes/base/cloudsql-secret.yaml
+kubernetes/base/gcp-ocr-credentials-secret.yaml
+kubernetes/overlays/*/secrets/
+
+# GCP Service Account Credentials
+**/gcp-credentials.json
+**/service-account*.json
+**/*-credentials.json
+*.pem
+*.key
+
+# Database Configuration (パスワード含む)
+alembic.ini
+**/alembic.ini
+
+# Local Configuration Files
+.env.local
+.env.*.local
+*.local.env
+
+# Change logs (個人情報や機密情報を含む可能性)
+*-changes.txt
+CHANGELOG.local.md
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Claude Code Settings
+.claude/settings.local.json

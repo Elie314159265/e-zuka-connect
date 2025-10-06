@@ -194,6 +194,7 @@ class Store(Base):
     rewards = relationship("Reward", back_populates="store")
     product_categories = relationship("ProductCategory", back_populates="store")
     products = relationship("Product", back_populates="store")
+    promotions = relationship("Promotion", back_populates="store")
 
 class StoreOwner(Base):
     __tablename__ = "store_owners"
@@ -354,6 +355,49 @@ class Product(Base):
     # リレーションシップ
     store = relationship("Store", back_populates="products")
     category = relationship("ProductCategory", back_populates="products")
+    promotions = relationship("Promotion", back_populates="product")
+
+# ========== プロモーション管理テーブル ==========
+
+class Promotion(Base):
+    __tablename__ = "promotions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+
+    # プロモーション内容
+    title = Column(String, nullable=False, index=True)
+    description = Column(Text)
+    promotion_text = Column(Text)  # 事業者が入力するプロモーション文章
+
+    # 画像・メディア
+    promotion_image_urls = Column(JSON)  # プロモーション用画像URLのリスト
+
+    # スケジュール
+    start_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    end_date = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    # 掲載ステータス
+    status = Column(String, default="draft", index=True)  # "draft", "scheduled", "active", "expired", "paused"
+    is_auto_published = Column(Boolean, default=True)  # 自動掲載するか
+    published_at = Column(DateTime(timezone=True))  # 実際に掲載された日時
+
+    # プロモーション設定
+    display_priority = Column(Integer, default=0)  # 表示優先度（高い数値ほど優先）
+    target_audience = Column(JSON)  # ターゲット層（年齢層、性別など）
+    max_views = Column(Integer)  # 最大表示回数（NULL=無制限）
+    current_views = Column(Integer, default=0)  # 現在の表示回数
+
+    # メタデータ
+    tags = Column(JSON)  # タグのリスト
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # リレーションシップ
+    store = relationship("Store", back_populates="promotions")
+    product = relationship("Product", back_populates="promotions")
 
 # ========== 初期バッジデータ定義 ==========
 

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Sparkles, Sun, CloudRain, BarChart3, PieChart as PieChartIcon, AlertTriangle, Package, Settings, Users } from 'lucide-react';
+import { Sparkles, Sun, CloudRain, BarChart3, PieChart as PieChartIcon, AlertTriangle, Package, Settings, Users, Megaphone } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
 import AiAdviceModal from '../../components/AiAdviceModal';
 import { useAuthStore } from '../../store/authStore';
@@ -265,17 +265,19 @@ export default function DashboardPage() {
                             </motion.div>
                         </Link>
 
-                        <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
-                        >
-                            <div className="flex items-center justify-center mb-2">
-                                <Users className="w-8 h-8 text-green-600" />
-                            </div>
-                            <h3 className="text-center font-semibold text-gray-900">顧客管理</h3>
-                            <p className="text-center text-sm text-gray-600 mt-1">近日公開</p>
-                        </motion.div>
+                        <Link href="/promotions">
+                            <motion.div
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                            >
+                                <div className="flex items-center justify-center mb-2">
+                                    <Megaphone className="w-8 h-8 text-orange-600" />
+                                </div>
+                                <h3 className="text-center font-semibold text-gray-900">プロモーション</h3>
+                                <p className="text-center text-sm text-gray-600 mt-1">販促キャンペーン</p>
+                            </motion.div>
+                        </Link>
 
                         <Link href="/sales-analytics">
                             <motion.div

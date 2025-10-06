@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: promotion-publisher
+  namespace: your-gcp-project-id
+  labels:
+    app: promotion-publisher
+spec:
+  # 毎日午前6時に実行 (JST = UTC+9なので、UTCでは前日21時)
+  schedule: "0 21 * * *"
+  concurrencyPolicy: Forbid  # 前回のジョブが完了していない場合は次のジョブをスキップ
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: promotion-publisher
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: promotion-publisher
+            image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20251006-061220
+            command:
+            - python
+            - /code/scripts/publish_promotions.py
+            env:
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "your-gcp-project-id-db"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: cloudsql-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cloudsql-secret
+                  key: password
+            - name: ENVIRONMENT
+              value: "production"
+
+          # Cloud SQL Proxy サイドカー
+          - name: cloud-sql-proxy
+            image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.1.0
+            args:
+            - "--structured-logs"
+            - "--port=5432"
+            - "your-gcp-project-id:us-central1:your-gcp-project-id-postgresql"
+            securityContext:
+              runAsNonRoot: true
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "200m"

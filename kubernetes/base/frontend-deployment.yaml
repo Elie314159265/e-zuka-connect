@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-09-30-v9
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:20251006-055557
         ports:
         - containerPort: 3000
         env:

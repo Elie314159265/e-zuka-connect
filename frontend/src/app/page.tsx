@@ -260,7 +260,7 @@ export default function HomePage() {
                     </FadeInWhenVisible>
                     <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
                         <FadeInWhenVisible>
-                             <motion.a href="/dashboard" className="group block bg-gray-50 p-8 rounded-xl shadow-md h-full" whileHover={{ y: -5, boxShadow: "0 10px 20px rgba(0,0,0,0.1)" }}>
+                             <motion.a href="/login/owner" className="group block bg-gray-50 p-8 rounded-xl shadow-md h-full" whileHover={{ y: -5, boxShadow: "0 10px 20px rgba(0,0,0,0.1)" }}>
                                 <div className="bg-purple-100 text-purple-600 w-16 h-16 rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform"><LayoutDashboard className="w-8 h-8" /></div>
                                 <h3 className="text-2xl font-bold mb-3">経営ダッシュボード</h3>
                                 <p className="text-gray-600">売上や客層をリアルタイムに可視化。データに基づいた経営判断が可能になります。</p>

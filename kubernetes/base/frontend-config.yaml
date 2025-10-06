@@ -5,5 +5,6 @@ metadata:
   namespace: your-gcp-project-id
 spec:
   redirectToHttps:
-    enabled: false
+    enabled: true
     responseCodeName: MOVED_PERMANENTLY_DEFAULT
+  sslPolicy: "modern-ssl-policy"

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Award, Cake, Star, Lock, UploadCloud, Gift } from 'lucide-react';
+import { Award, Cake, Star, Lock, UploadCloud, Gift, Megaphone } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useRouter } from 'next/navigation';
 
@@ -267,6 +267,37 @@ export default function MyPage() {
                             })()}
                         </>
                     )}
+                </div>
+
+                {/* Quick Actions */}
+                <div className="mb-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Link href="/public-promotions">
+                            <motion.div
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-orange-200"
+                            >
+                                <div className="flex items-center justify-center mb-2">
+                                    <Megaphone className="w-8 h-8 text-orange-600" />
+                                </div>
+                                <h3 className="text-center font-semibold text-gray-900">今日のプロモーション</h3>
+                                <p className="text-center text-sm text-gray-600 mt-1">お得なキャンペーン情報</p>
+                            </motion.div>
+                        </Link>
+
+                        <motion.div
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
+                        >
+                            <div className="flex items-center justify-center mb-2">
+                                <Gift className="w-8 h-8 text-purple-600" />
+                            </div>
+                            <h3 className="text-center font-semibold text-gray-900">マイクーポン</h3>
+                            <p className="text-center text-sm text-gray-600 mt-1">近日公開</p>
+                        </motion.div>
+                    </div>
                 </div>
 
                 {/* File Upload Section */}

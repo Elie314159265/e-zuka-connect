@@ -14,5 +14,8 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 # アプリケーションのコードをコピー
 COPY ./app /code/app
 
+# スクリプトをコピー
+COPY ./scripts /code/scripts
+
 # uvicornを起動してアプリケーションを実行 (10秒待機)
 CMD ["sh", "-c", "sleep 10 && uvicorn app.main:app --host 0.0.0.0 --port 80"]

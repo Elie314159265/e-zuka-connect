@@ -475,3 +475,50 @@ class ProductStockUpdate(BaseModel):
     quantity_change: int  # 正の値=入庫、負の値=出庫
     reason: str  # "purchase", "sale", "adjustment", "return"
     notes: Optional[str] = None
+
+# ========== Promotion Schemas ==========
+
+class PromotionBase(BaseModel):
+    product_id: int
+    title: str
+    description: Optional[str] = None
+    promotion_text: Optional[str] = None
+    promotion_image_urls: Optional[List[str]] = None
+    start_date: datetime
+    end_date: datetime
+    is_auto_published: bool = True
+    display_priority: int = 0
+    target_audience: Optional[Dict[str, Any]] = None
+    max_views: Optional[int] = None
+    tags: Optional[List[str]] = None
+
+class PromotionCreate(PromotionBase):
+    store_id: int
+
+class PromotionUpdate(BaseModel):
+    product_id: Optional[int] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    promotion_text: Optional[str] = None
+    promotion_image_urls: Optional[List[str]] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    status: Optional[str] = None  # "draft", "scheduled", "active", "expired", "paused"
+    is_auto_published: Optional[bool] = None
+    display_priority: Optional[int] = None
+    target_audience: Optional[Dict[str, Any]] = None
+    max_views: Optional[int] = None
+    tags: Optional[List[str]] = None
+
+class Promotion(PromotionBase):
+    id: int
+    store_id: int
+    status: str
+    published_at: Optional[datetime] = None
+    current_views: int
+    created_at: datetime
+    updated_at: datetime
+    product: Optional[Product] = None
+
+    class Config:
+        from_attributes = True

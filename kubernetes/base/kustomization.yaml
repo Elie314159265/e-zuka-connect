@@ -18,3 +18,4 @@ resources:
   - managed-certificate.yaml
   - ingress.yaml
   - cronjob.yaml
+  - promotion-cronjob.yaml

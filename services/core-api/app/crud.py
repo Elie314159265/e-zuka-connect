@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from typing import Optional
 from . import models, schemas
 from .security import get_password_hash
 
@@ -816,3 +817,115 @@ def find_or_create_store(db: Session, supplier_name: str, supplier_phone: str = 
     db.refresh(new_store)
 
     return new_store
+
+# ========== Promotion CRUD ==========
+
+def create_promotion(db: Session, promotion: schemas.PromotionCreate):
+    """プロモーションを作成"""
+    db_promotion = models.Promotion(**promotion.model_dump())
+    db.add(db_promotion)
+    db.commit()
+    db.refresh(db_promotion)
+    return db_promotion
+
+def get_promotion(db: Session, promotion_id: int):
+    """プロモーションを取得"""
+    return db.query(models.Promotion).filter(models.Promotion.id == promotion_id).first()
+
+def get_promotions(
+    db: Session,
+    store_id: int,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100
+):
+    """プロモーション一覧を取得"""
+    query = db.query(models.Promotion).filter(models.Promotion.store_id == store_id)
+
+    if status:
+        query = query.filter(models.Promotion.status == status)
+
+    return query.order_by(models.Promotion.display_priority.desc(), models.Promotion.created_at.desc()).offset(skip).limit(limit).all()
+
+def get_active_promotions(db: Session, limit: int = 10):
+    """アクティブなプロモーション一覧を取得（ユーザー向け）"""
+    from datetime import datetime
+    now = datetime.now()
+
+    return (
+        db.query(models.Promotion)
+        .filter(
+            models.Promotion.status == "active",
+            models.Promotion.start_date <= now,
+            models.Promotion.end_date >= now
+        )
+        .order_by(models.Promotion.display_priority.desc(), models.Promotion.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+def update_promotion(db: Session, promotion_id: int, promotion_update: schemas.PromotionUpdate):
+    """プロモーションを更新"""
+    db_promotion = get_promotion(db, promotion_id)
+    if not db_promotion:
+        return None
+
+    update_data = promotion_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_promotion, field, value)
+
+    db.commit()
+    db.refresh(db_promotion)
+    return db_promotion
+
+def delete_promotion(db: Session, promotion_id: int):
+    """プロモーションを削除"""
+    db_promotion = get_promotion(db, promotion_id)
+    if not db_promotion:
+        return False
+
+    db.delete(db_promotion)
+    db.commit()
+    return True
+
+def increment_promotion_views(db: Session, promotion_id: int):
+    """プロモーションの閲覧数を増やす"""
+    db_promotion = get_promotion(db, promotion_id)
+    if not db_promotion:
+        return None
+
+    db_promotion.current_views += 1
+    db.commit()
+    db.refresh(db_promotion)
+    return db_promotion
+
+def get_scheduled_promotions_for_publishing(db: Session):
+    """自動掲載対象のプロモーションを取得（バッチ処理用）"""
+    from datetime import datetime
+    now = datetime.now()
+
+    return (
+        db.query(models.Promotion)
+        .filter(
+            models.Promotion.status == "scheduled",
+            models.Promotion.is_auto_published == True,
+            models.Promotion.start_date <= now,
+            models.Promotion.end_date >= now
+        )
+        .all()
+    )
+
+def publish_promotion(db: Session, promotion_id: int):
+    """プロモーションを公開状態にする"""
+    from datetime import datetime
+
+    db_promotion = get_promotion(db, promotion_id)
+    if not db_promotion:
+        return None
+
+    db_promotion.status = "active"
+    db_promotion.published_at = datetime.now()
+
+    db.commit()
+    db.refresh(db_promotion)
+    return db_promotion
