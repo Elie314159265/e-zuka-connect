@@ -1,0 +1,212 @@
+# 2025-10-10 変更内容: AI経営アドバイザー機能の実装
+
+## 概要
+ルールベースの売上分析を、Gemini 2.5 Flash APIを使った本物のAI機能に置き換えました。
+
+## 主な変更点
+
+### 1. AI統合 (services/ai-advisor/)
+- **Gemini 2.5 Flash API統合**
+  - google-generativeai==0.8.3 を追加
+  - llm_advisor.py を新規作成
+  - 売上・天候・商品・顧客データから動的にアドバイスを生成
+
+- **安全設定の実装**
+  - HarmCategory.BLOCK_NONE で安全フィルターを最小化
+  - プロンプトを中立的な表現に変更（「経営改善」→「運営に役立つ提案」）
+  - finish_reason=2 (SAFETY) エラーを回避
+
+- **レスポンスパース機能**
+  - AIが生成したテキストをキーワードで自動分類
+  - 商品戦略・顧客戦略・天候戦略に振り分け
+  - 番号付きリスト（1. 2. 3.）や箇条書き（-、・）を自動抽出
+
+### 2. バックエンド統合 (services/core-api/)
+- **新エンドポイント追加**: `/api/analysis/ai-advice` (GET)
+  - 既存の分析データを集約
+  - ai-advisor-service:8002 を呼び出し
+  - httpx で非同期通信
+
+- **データ整形**
+  - 辞書とオブジェクトの両方に対応
+  - daily_sales, weather_data, product_rankings, demographics を送信
+
+### 3. フロントエンド更新 (frontend/)
+- **エンドポイント修正**
+  - `/api/ai-advice/generate` → `/api/analysis/ai-advice`
+  - POST → GET に変更
+
+### 4. Kubernetes設定
+
+#### 環境変数の永続化
+- **Secret作成**: kubernetes/base/ai-advisor-secret.yaml
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ai-advisor-secrets
+    namespace: your-gcp-project-id
+  type: Opaque
+  stringData:
+    google-api-key: AIzaSyC... (実際のAPIキー)
+  ```
+
+- **Deployment更新**: kubernetes/base/ai-advisor-deployment.yaml
+  ```yaml
+  env:
+  - name: GOOGLE_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ai-advisor-secrets
+        key: google-api-key
+  ```
+
+#### サービス名の修正
+- core-api が `ai-advisor-service:8002` を呼び出すように変更
+  （以前は `ai-advisor:8002` で接続エラー）
+
+### 5. Dockerイメージ更新
+
+| サービス | 最終イメージタグ | 内容 |
+|---------|----------------|------|
+| ai-advisor | 2025-10-10-v3 | Gemini API統合 + レスポンスパース |
+| core-api | 2025-10-10-v3 | /api/analysis/ai-advice エンドポイント + サービス名修正 |
+| frontend | 2025-10-10-v1 | エンドポイント修正 |
+
+## トラブルシューティング
+
+### 発生した問題と解決策
+
+1. **AttributeError: 'dict' object has no attribute 'sunny_days_sales'**
+   - 原因: weather_data が辞書で返されているのに属性アクセス
+   - 解決: isinstance(weather_data, dict) でチェックして辞書アクセス
+
+2. **Name or service not known エラー**
+   - 原因: サービス名が `ai-advisor` だが実際は `ai-advisor-service`
+   - 解決: `http://ai-advisor-service:8002` に修正
+
+3. **finish_reason=2 (SAFETY) エラー**
+   - 原因: Gemini APIの安全フィルターがビジネス用語を誤検出
+   - 解決:
+     - HarmBlockThreshold.BLOCK_NONE を設定
+     - プロンプトを文章形式に変更
+     - 攻撃的な表現を削除（「経営改善のアドバイス」→「運営に役立つ提案」）
+
+4. **推奨アクションプランが空白**
+   - 原因: LLMの出力が構造化されていない
+   - 解決: キーワードベースの自動パース機能を実装
+
+## コスト
+
+### Gemini 2.5 Flash API
+- **料金**: $0.075/1M tokens (入力), $0.30/1M tokens (出力)
+- **1回あたり**: 約0.04円
+- **月間100店舗**: 約126円 (1日1回 × 30日)
+- **無料枠**: 1日1,500リクエストまで無料
+
+## 処理フロー
+
+```
+ユーザー (dashboard)
+  ↓ 「AIアドバイザー」ボタンクリック
+frontend
+  ↓ GET /api/analysis/ai-advice
+core-api
+  ↓ 売上・天候・商品・顧客データを取得・整形
+  ↓ POST http://ai-advisor-service:8002/api/advice/generate
+ai-advisor
+  ↓ Gemini 2.5 Flash API呼び出し
+  ↓ レスポンスをパースして構造化
+core-api
+  ↓ JSON返却
+frontend
+  ↓ モーダルに表示
+```
+
+## 重要ファイル
+
+### 新規作成
+- services/ai-advisor/app/llm_advisor.py
+- kubernetes/base/ai-advisor-secret.yaml
+
+### 主要な変更
+- services/ai-advisor/requirements.txt (google-generativeai追加)
+- services/core-api/app/routers/analysis.py (get_ai_advice追加)
+- frontend/src/components/AiAdviceModal.tsx (エンドポイント修正)
+- kubernetes/base/ai-advisor-deployment.yaml (Secret参照追加)
+- kubernetes/base/core-api-deployment.yaml (イメージ更新)
+- kubernetes/base/frontend-deployment.yaml (イメージ更新)
+
+## デプロイコマンド履歴
+
+```bash
+# 1. イメージビルド
+docker build -t asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ai-advisor:2025-10-10-v3 .
+docker build -t asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-10-10-v3 .
+docker build -t asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-10-10-v1 .
+
+# 2. プッシュ
+docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ai-advisor:2025-10-10-v3
+docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-10-10-v3
+docker push asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-10-10-v1
+
+# 3. Secret作成
+kubectl apply -f kubernetes/base/ai-advisor-secret.yaml
+
+# 4. デプロイ
+kubectl apply -f kubernetes/base/ai-advisor-deployment.yaml
+kubectl apply -f kubernetes/base/core-api-deployment.yaml
+kubectl apply -f kubernetes/base/frontend-deployment.yaml
+```
+
+## 今後の改善案
+
+1. **レスポンスキャッシュ**
+   - 同じデータに対する重複リクエストを削減
+   - Redis等でキャッシュ実装
+
+2. **プロンプトエンジニアリング**
+   - より具体的で実行可能なアドバイスを生成
+   - 店舗タイプ別にプロンプトを最適化
+
+3. **マルチモデル対応**
+   - Gemini以外のLLM（Claude, GPT-4等）も選択可能に
+   - コスト・品質でモデルを切り替え
+
+4. **フィードバック機能**
+   - ユーザーがアドバイスを評価
+   - 評価データでプロンプトを改善
+
+5. **時系列予測の追加**
+   - Prophet/ARIMAで売上予測
+   - 予測データもLLMに渡してより高度な分析
+
+## セキュリティ考慮事項
+
+- **API鍵管理**: Kubernetes Secretで保護
+- **外部通信**: ai-advisor ↔ Gemini API (HTTPS)
+- **データ送信**: 個人情報は含まず、集計データのみ
+- **アクセス制御**: 認証済みの店舗オーナーのみアクセス可能
+
+## 検証方法
+
+```bash
+# 1. Podの確認
+kubectl get pods -n your-gcp-project-id | grep ai-advisor
+kubectl get pods -n your-gcp-project-id | grep core-api
+
+# 2. ログ確認
+kubectl logs -n your-gcp-project-id <ai-advisor-pod-name>
+kubectl logs -n your-gcp-project-id <core-api-pod-name> -c core-api
+
+# 3. 動作確認
+# https://your-gcp-project-id.com/dashboard にアクセス
+# 「AIアドバイザー」ボタンをクリック
+# → Geminiが生成したアドバイスが表示されること
+```
+
+## 参考リンク
+
+- Gemini API Docs: https://ai.google.dev/docs
+- Google AI Studio: https://aistudio.google.com/apikey
+- google-generativeai PyPI: https://pypi.org/project/google-generativeai/

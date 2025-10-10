@@ -15,10 +15,10 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:20251006-055557
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/frontend:2025-10-10-v1
         ports:
         - containerPort: 3000
         env:
         - name: NEXT_PUBLIC_API_BASE_URL
           value: "https://your-gcp-project-id.com"
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always

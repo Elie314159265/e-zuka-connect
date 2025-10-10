@@ -62,6 +62,7 @@ cloud_sql_proxy
 kubernetes/base/*-secret.yaml
 kubernetes/base/cloudsql-secret.yaml
 kubernetes/base/gcp-ocr-credentials-secret.yaml
+kubernetes/base/ai-advisor-secret.yaml
 kubernetes/overlays/*/secrets/
 
 # GCP Service Account Credentials

@@ -15,9 +15,10 @@ spec:
     spec:
       containers:
       - name: core-api
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:20251006-052000
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/core-api:2025-10-10-v3
         ports:
         - containerPort: 80
+        imagePullPolicy: Always
         startupProbe:
           httpGet:
             path: /api

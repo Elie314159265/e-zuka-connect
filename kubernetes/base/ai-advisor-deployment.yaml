@@ -15,9 +15,15 @@ spec:
     spec:
       containers:
       - name: ai-advisor
-        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ai-advisor:2025-09-30-v1
+        image: asia-northeast1-docker.pkg.dev/your-gcp-project-id/your-gcp-project-id-repo/ai-advisor:2025-10-10-v3
         ports:
         - containerPort: 8002
+        env:
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-advisor-secrets
+              key: google-api-key
         resources:
           requests:
             cpu: "250m"
@@ -25,4 +31,4 @@ spec:
           limits:
             cpu: "500m"
             memory: "1Gi"
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always

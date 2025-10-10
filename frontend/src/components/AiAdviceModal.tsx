@@ -63,8 +63,8 @@ export default function AiAdviceModal({ isOpen, onClose }: AiAdviceModalProps) {
         try {
             const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://your-gcp-project-id.com';
 
-            const response = await fetch(`${apiBaseUrl}/api/ai-advice/generate`, {
-                method: 'POST',
+            const response = await fetch(`${apiBaseUrl}/api/analysis/ai-advice`, {
+                method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'

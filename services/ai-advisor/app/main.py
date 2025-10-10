@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .analyzer import generate_comprehensive_advice
+from .llm_advisor import get_gemini_advisor
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -99,13 +100,15 @@ def health_check():
 @app.post("/api/advice/generate", response_model=AdviceResponse)
 async def generate_advice(request: AdviceRequest):
     """
-    経営アドバイス生成エンドポイント
+    AI経営アドバイス生成エンドポイント（Gemini API使用）
 
     売上データ、天候データ、商品ランキング、顧客層データを分析し、
-    総合的な経営アドバイスを生成します。
+    Gemini APIを使って総合的な経営アドバイスを生成します。
+
+    フォールバック: Gemini APIが利用不可の場合、ルールベース分析にフォールバックします。
     """
     try:
-        logger.info("経営アドバイス生成リクエストを受信")
+        logger.info("AI経営アドバイス生成リクエストを受信")
 
         # データを辞書形式に変換
         daily_sales_dict = [sale.model_dump() for sale in request.daily_sales]
@@ -113,16 +116,54 @@ async def generate_advice(request: AdviceRequest):
         product_rankings_dict = request.product_rankings.model_dump()
         demographics_dict = request.demographics.model_dump()
 
-        # 総合アドバイス生成
-        advice = generate_comprehensive_advice(
-            daily_sales=daily_sales_dict,
-            weather_data=weather_data_dict,
-            product_rankings=product_rankings_dict,
-            demographics=demographics_dict
-        )
+        # Gemini Advisorを取得
+        gemini_advisor = get_gemini_advisor()
 
-        logger.info("経営アドバイス生成完了")
-        return advice
+        # LLMが利用可能な場合はAI生成、そうでなければルールベース
+        if gemini_advisor.is_available():
+            logger.info("Gemini APIを使用してAIアドバイス生成")
+
+            # まず統計分析を実行（LLMへの入力データとして使用）
+            from .analyzer import SalesAnalyzer, ProductAnalyzer, CustomerAnalyzer
+
+            sales_trend = SalesAnalyzer.analyze_sales_trend(daily_sales_dict)
+            weather_impact = SalesAnalyzer.analyze_weather_impact(weather_data_dict)
+            product_analysis = ProductAnalyzer.analyze_product_performance(product_rankings_dict)
+            customer_analysis = CustomerAnalyzer.analyze_demographics(demographics_dict)
+
+            try:
+                # Gemini APIでアドバイス生成
+                advice = gemini_advisor.generate_advice(
+                    sales_trend=sales_trend,
+                    weather_impact=weather_impact,
+                    product_analysis=product_analysis,
+                    customer_analysis=customer_analysis
+                )
+                logger.info("AIアドバイス生成完了")
+                return advice
+
+            except Exception as llm_error:
+                logger.warning(f"Gemini API呼び出しエラー、ルールベースにフォールバック: {str(llm_error)}")
+                # LLMエラー時はルールベースにフォールバック
+                advice = generate_comprehensive_advice(
+                    daily_sales=daily_sales_dict,
+                    weather_data=weather_data_dict,
+                    product_rankings=product_rankings_dict,
+                    demographics=demographics_dict
+                )
+                logger.info("ルールベースアドバイス生成完了（フォールバック）")
+                return advice
+        else:
+            logger.info("Gemini API未設定、ルールベース分析を使用")
+            # 総合アドバイス生成（ルールベース）
+            advice = generate_comprehensive_advice(
+                daily_sales=daily_sales_dict,
+                weather_data=weather_data_dict,
+                product_rankings=product_rankings_dict,
+                demographics=demographics_dict
+            )
+            logger.info("ルールベースアドバイス生成完了")
+            return advice
 
     except Exception as e:
         logger.error(f"アドバイス生成中にエラーが発生: {str(e)}")

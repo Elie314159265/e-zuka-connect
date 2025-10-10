@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, Date
-from typing import List
+from typing import List, Dict, Any
 from datetime import date, timedelta
+import httpx
+import os
 
 from .. import crud, schemas, security, models
 from ..security.auth import get_current_store_owner
@@ -268,3 +270,65 @@ def get_product_rankings(db: Session = Depends(get_db), current_owner: models.St
         "quantity_ranking": [{"name": desc, "value": int(qty)} for desc, qty in quantity_ranking],
         "sales_ranking": [{"name": desc, "value": int(sales)} for desc, sales in sales_ranking],
     }
+
+
+@router.get("/ai-advice")
+async def get_ai_advice(
+    db: Session = Depends(get_db),
+    current_owner: models.StoreOwner = Depends(get_current_store_owner)
+) -> Dict[str, Any]:
+    """
+    AI経営アドバイスを生成します。
+    ai-advisorサービスのGemini APIを使用して、売上・天候・商品・顧客データから
+    動的に経営アドバイスを生成します。
+    """
+
+    # 各種分析データを取得
+    daily_sales_data = get_daily_sales(db=db, current_owner=current_owner, days_back=7, days_forward=0)
+    weather_data = get_sales_by_weather(db=db, current_owner=current_owner)
+    product_rankings = get_product_rankings(db=db, current_owner=current_owner, limit=5)
+    customer_demographics = get_customer_demographics(db=db, current_owner=current_owner)
+
+    # ai-advisorサービスに送信するデータを整形
+    request_payload = {
+        "daily_sales": [
+            {
+                "date": str(sale.date),
+                "total_sales": sale.total_sales,
+                "temperature_max": sale.temperature_max,
+                "temperature_min": sale.temperature_min,
+                "is_forecast": sale.is_forecast
+            }
+            for sale in daily_sales_data
+        ],
+        "weather_data": {
+            "sunny_days_sales": weather_data["sunny_days_sales"] if isinstance(weather_data, dict) else weather_data.sunny_days_sales,
+            "rainy_days_sales": weather_data["rainy_days_sales"] if isinstance(weather_data, dict) else weather_data.rainy_days_sales,
+            "sunny_days_count": weather_data["sunny_days_count"] if isinstance(weather_data, dict) else weather_data.sunny_days_count,
+            "rainy_days_count": weather_data["rainy_days_count"] if isinstance(weather_data, dict) else weather_data.rainy_days_count
+        },
+        "product_rankings": product_rankings,
+        "demographics": customer_demographics
+    }
+
+    # ai-advisorサービスのURL（Kubernetes内部ではサービス名で解決）
+    ai_advisor_url = os.getenv("AI_ADVISOR_URL", "http://ai-advisor-service:8002")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{ai_advisor_url}/api/advice/generate",
+                json=request_payload
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI Advisor service error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate AI advice: {str(e)}"
+        )
