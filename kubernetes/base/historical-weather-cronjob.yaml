@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: historical-weather-fetch-cronjob
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   # 毎日午前2時（JST）= UTC 17:00に実行
   # 過去データの更新なので、1日1回で十分

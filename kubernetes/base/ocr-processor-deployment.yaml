@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ocr-processor
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   replicas: 1
   selector:

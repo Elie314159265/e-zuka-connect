@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: weather-fetch-cronjob
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   # 気象庁APIから最新の予報データを取得してCloudSQLに保存
   # 手動登録された過去データは保持し、今日以降の予報データのみ更新

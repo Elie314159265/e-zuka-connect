@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-config
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 data:
   # General App Settings
   GINSENG_MODE: "production"

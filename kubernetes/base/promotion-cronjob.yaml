@@ -2,7 +2,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: promotion-publisher
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
   labels:
     app: promotion-publisher
 spec:

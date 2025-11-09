@@ -17,7 +17,7 @@ router = APIRouter(
 )
 
 # AI Advisor Serviceのエンドポイント
-AI_ADVISOR_SERVICE_URL = "http://ai-advisor-service.your-gcp-project-id.svc.cluster.local:8002"
+AI_ADVISOR_SERVICE_URL = "http://ai-advisor-service.e-zuka-connect.svc.cluster.local:8002"
 
 
 @router.post("/generate")

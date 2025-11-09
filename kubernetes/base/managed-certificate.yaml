@@ -2,7 +2,7 @@ apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
   name: your-gcp-project-id-certificate
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   domains:
     - your-gcp-project-id.com

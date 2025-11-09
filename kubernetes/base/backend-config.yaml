@@ -2,7 +2,7 @@ apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:
   name: api-backend-config
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   healthCheck:
     checkIntervalSec: 15

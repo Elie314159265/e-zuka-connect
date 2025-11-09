@@ -2,7 +2,7 @@ apiVersion: networking.gke.io/v1beta1
 kind: FrontendConfig
 metadata:
   name: http-to-https-redirect
-  namespace: your-gcp-project-id
+  namespace: e-zuka-connect
 spec:
   redirectToHttps:
     enabled: true
