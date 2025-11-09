@@ -271,7 +271,8 @@ e-zuka-connect/
 
 ## 開発者・貢献者
 
-- Elie
+- **GitHub**: [Elie](https://github.com/Elie314159265)
+- **Portfolio**: [Elie's Portfolio Site](https://portfolio-eight-phi-97.vercel.app/)
 
 ## サポート・お問い合わせ
 
