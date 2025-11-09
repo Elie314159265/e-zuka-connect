@@ -93,3 +93,10 @@ CHANGELOG.local.md
 
 # Claude Code Settings
 .claude/settings.local.json
+
+# Security and Sensitive Files
+*-security.txt
+vulnerabilities.txt
+backup*.sql
+*.sql.gz
+*-backup-*.bundle

@@ -1,0 +1,644 @@
+=================================================
+E-ZUKA CONNECT サービス再開マニュアル
+=================================================
+
+最終更新: 2025-10-17
+アプリケーションコンテスト終了時点での状態を基に作成
+
+=================================================
+目次
+=================================================
+1. 事前準備
+2. GCPリソースの再作成
+3. データベースのセットアップ
+4. アプリケーションのデプロイ
+5. 動作確認
+6. トラブルシューティング
+7. 重要な設定情報
+
+=================================================
+1. 事前準備
+=================================================
+
+□ 必要なツールの確認
+  - gcloud CLI (Google Cloud SDK)
+  - kubectl (Kubernetes CLI)
+  - Docker
+  - Git
+
+□ 必要な認証情報の確認
+  - GCPプロジェクトID
+  - GCPサービスアカウントキー
+  - JWT秘密鍵 (JWT_SECRET_KEY)
+  - データベースパスワード
+  - LINE Messaging API設定（必要に応じて）
+    * Channel Secret
+    * Channel Access Token
+
+□ コードリポジトリの取得
+  git clone <repository-url>
+  cd your-gcp-project-id
+  git checkout main
+  # または特定のバージョン: git checkout v1.0-contest-end
+
+=================================================
+2. GCPリソースの再作成
+=================================================
+
+2.1 GCPプロジェクトの設定
+-------------------------------------------------
+# プロジェクトIDを設定
+export PROJECT_ID="your-project-id"
+gcloud config set project $PROJECT_ID
+
+# 必要なAPIを有効化
+gcloud services enable container.googleapis.com
+gcloud services enable sqladmin.googleapis.com
+gcloud services enable storage-api.googleapis.com
+gcloud services enable documentai.googleapis.com
+
+2.2 GKEクラスタの作成
+-------------------------------------------------
+# 基本的なクラスタ作成（リージョンとゾーンは要件に応じて調整）
+gcloud container clusters create e-zuka-cluster \
+  --zone asia-northeast1-a \
+  --num-nodes 2 \
+  --machine-type e2-medium \
+  --disk-size 20 \
+  --enable-autoscaling \
+  --min-nodes 1 \
+  --max-nodes 3
+
+# クラスタ認証情報を取得
+gcloud container clusters get-credentials e-zuka-cluster \
+  --zone asia-northeast1-a
+
+# クラスタ接続確認
+kubectl cluster-info
+kubectl get nodes
+
+2.3 Cloud SQLインスタンスの作成
+-------------------------------------------------
+# PostgreSQLインスタンス作成（本番環境の場合）
+gcloud sql instances create e-zuka-postgres \
+  --database-version=POSTGRES_15 \
+  --tier=db-f1-micro \
+  --region=asia-northeast1 \
+  --root-password="YOUR_STRONG_PASSWORD"
+
+# データベース作成
+gcloud sql databases create ezuka_db \
+  --instance=e-zuka-postgres
+
+# ユーザー作成
+gcloud sql users create ezuka_user \
+  --instance=e-zuka-postgres \
+  --password="YOUR_USER_PASSWORD"
+
+# Cloud SQL Proxyを使用する場合のサービスアカウント設定
+gcloud iam service-accounts create cloudsql-proxy
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:cloudsql-proxy@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/cloudsql.client"
+
+# 接続名を確認（後で使用）
+gcloud sql instances describe e-zuka-postgres --format="value(connectionName)"
+
+2.4 Cloud Storageバケットの作成
+-------------------------------------------------
+# レシート画像保存用バケット
+gsutil mb -l asia-northeast1 gs://$PROJECT_ID-receipts/
+gsutil mb -l asia-northeast1 gs://$PROJECT_ID-receipts-processed/
+
+# バケットへのアクセス権限設定
+gsutil iam ch serviceAccount:YOUR_SERVICE_ACCOUNT@$PROJECT_ID.iam.gserviceaccount.com:objectAdmin \
+  gs://$PROJECT_ID-receipts/
+
+2.5 Document AI Processorの設定
+-------------------------------------------------
+# Document AI APIが有効になっていることを確認
+gcloud services enable documentai.googleapis.com
+
+# Processorを作成（GCPコンソールで実行することを推奨）
+# 1. GCPコンソール > Document AI > Processors
+# 2. "CREATE PROCESSOR"をクリック
+# 3. "Form Parser" または "OCR Processor"を選択
+# 4. Processor IDをメモ（環境変数で使用）
+
+=================================================
+3. データベースのセットアップ
+=================================================
+
+3.1 データベーススキーマの作成
+-------------------------------------------------
+# 方法1: SQLAlchemyモデルから自動作成
+cd services/core-api
+
+# 環境変数を設定
+export DATABASE_URL="postgresql://ezuka_user:YOUR_PASSWORD@CLOUD_SQL_IP:5432/ezuka_db"
+
+# Pythonで実行
+python -c "from app.database import engine; from app.models import Base; Base.metadata.create_all(bind=engine)"
+
+# 方法2: Alembicマイグレーションを使用
+alembic upgrade head
+
+# 方法3: SQLダンプから復元（バックアップがある場合）
+psql -h CLOUD_SQL_IP -U ezuka_user -d ezuka_db -f schema-backup.sql
+
+3.2 初期データの投入
+-------------------------------------------------
+# 初期バッジデータなど、必要に応じて投入
+# services/core-api/scripts/ 配下にスクリプトがある場合
+python scripts/init_badges.py
+
+3.3 Kubernetes Secretの作成
+-------------------------------------------------
+# データベース接続情報をSecretとして保存
+kubectl create secret generic db-secret \
+  --from-literal=DATABASE_URL="postgresql://ezuka_user:YOUR_PASSWORD@CLOUD_SQL_IP:5432/ezuka_db"
+
+# JWT秘密鍵
+kubectl create secret generic jwt-secret \
+  --from-literal=JWT_SECRET_KEY="your-random-secret-key-here"
+
+# GCPサービスアカウントキー
+kubectl create secret generic gcp-credentials \
+  --from-file=key.json=/path/to/service-account-key.json
+
+# LINE API設定（必要に応じて）
+kubectl create secret generic line-secret \
+  --from-literal=LINE_CHANNEL_SECRET="your-channel-secret" \
+  --from-literal=LINE_CHANNEL_ACCESS_TOKEN="your-access-token"
+
+=================================================
+4. アプリケーションのデプロイ
+=================================================
+
+4.1 Dockerイメージのビルドとプッシュ
+-------------------------------------------------
+# GCR (Google Container Registry) を使用する場合
+export PROJECT_ID="your-project-id"
+
+# Core API
+cd services/core-api
+docker build -t gcr.io/$PROJECT_ID/core-api:v1.0 .
+docker push gcr.io/$PROJECT_ID/core-api:v1.0
+
+# OCR Processor
+cd ../ocr-processor
+docker build -t gcr.io/$PROJECT_ID/ocr-processor:v1.0 .
+docker push gcr.io/$PROJECT_ID/ocr-processor:v1.0
+
+# Frontend
+cd ../../frontend
+docker build -t gcr.io/$PROJECT_ID/frontend:v1.0 .
+docker push gcr.io/$PROJECT_ID/frontend:v1.0
+
+4.2 Kubernetes ConfigMapの作成
+-------------------------------------------------
+# アプリケーション設定
+kubectl create configmap app-config \
+  --from-literal=ENVIRONMENT="production" \
+  --from-literal=PROJECT_ID="$PROJECT_ID" \
+  --from-literal=PROCESSOR_ID="your-processor-id" \
+  --from-literal=GCS_BUCKET_NAME="$PROJECT_ID-receipts"
+
+4.3 Kubernetesリソースのデプロイ
+-------------------------------------------------
+# kubernetes/base/ と kubernetes/production/ の設定を確認
+# 必要に応じてイメージタグやレプリカ数を調整
+
+# kustomizeを使用してデプロイ
+kubectl apply -k kubernetes/production/
+
+# または個別にデプロイ
+kubectl apply -f kubernetes/base/core-api-deployment.yaml
+kubectl apply -f kubernetes/base/core-api-service.yaml
+kubectl apply -f kubernetes/base/ocr-processor-deployment.yaml
+kubectl apply -f kubernetes/base/ocr-processor-service.yaml
+kubectl apply -f kubernetes/base/frontend-deployment.yaml
+kubectl apply -f kubernetes/base/frontend-service.yaml
+
+# Ingressの設定（外部アクセス用）
+kubectl apply -f kubernetes/base/ingress.yaml
+
+4.4 CronJobのデプロイ（プロモーション自動掲載など）
+-------------------------------------------------
+kubectl apply -f kubernetes/base/promotion-cronjob.yaml
+
+# CronJobの動作確認
+kubectl get cronjobs
+
+=================================================
+5. 動作確認
+=================================================
+
+5.1 Podの状態確認
+-------------------------------------------------
+kubectl get pods
+kubectl get services
+kubectl get ingress
+
+# 各Podのログ確認
+kubectl logs -l app=core-api
+kubectl logs -l app=ocr-processor
+kubectl logs -l app=frontend
+
+5.2 サービスの疎通確認
+-------------------------------------------------
+# Core APIの確認
+kubectl port-forward svc/core-api 8000:8000
+curl http://localhost:8000/api/debug/health
+
+# OCR Processorの確認
+kubectl port-forward svc/ocr-processor 8001:8001
+curl http://localhost:8001/health
+
+# Frontendの確認
+kubectl port-forward svc/frontend 3000:3000
+# ブラウザで http://localhost:3000 にアクセス
+
+5.3 データベース接続確認
+-------------------------------------------------
+# Postgresに直接接続
+kubectl port-forward svc/postgres 5432:5432
+psql -h localhost -U ezuka_user -d ezuka_db
+
+# テーブル一覧表示
+\dt
+
+# テーブル構造確認
+\d users
+\d receipts
+\d stores
+
+5.4 外部アクセスの確認
+-------------------------------------------------
+# Ingressの外部IPを取得
+kubectl get ingress
+
+# 取得したIPまたはドメインでアクセステスト
+curl http://YOUR_DOMAIN/api/debug/health
+
+=================================================
+6. トラブルシューティング
+=================================================
+
+6.1 よくある問題と解決方法
+-------------------------------------------------
+
+問題: Podが起動しない (ImagePullBackOff)
+解決:
+  - イメージ名が正しいか確認
+  - GCRへのプッシュが完了しているか確認
+  - GKEクラスタがGCRにアクセスできるか確認
+  kubectl describe pod <pod-name>
+
+問題: データベースに接続できない
+解決:
+  - DATABASE_URL環境変数が正しいか確認
+  - Cloud SQL Proxyが動作しているか確認
+  - ファイアウォールルールを確認
+  kubectl logs <pod-name>
+
+問題: OCR処理が失敗する
+解決:
+  - Document AI Processor IDが正しいか確認
+  - GCPサービスアカウントに必要な権限があるか確認
+  - GCS URIが正しいフォーマットか確認
+  kubectl logs -l app=ocr-processor
+
+問題: CORSエラーが発生する
+解決:
+  - core-apiのCORS設定を確認
+  - services/core-api/app/main.py の origins リストに
+    フロントエンドのURLが含まれているか確認
+
+問題: Secretsが見つからない
+解決:
+  kubectl get secrets
+  kubectl describe secret <secret-name>
+
+6.2 ログの確認方法
+-------------------------------------------------
+# リアルタイムログ
+kubectl logs -f <pod-name>
+
+# 前回のコンテナログ（再起動した場合）
+kubectl logs <pod-name> --previous
+
+# 全てのPodのログを一括確認
+kubectl logs -l app=core-api --tail=100
+
+6.3 デバッグモードでの起動
+-------------------------------------------------
+# Core APIをデバッグモードで起動
+kubectl exec -it <core-api-pod-name> -- /bin/bash
+cd /app
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level debug
+
+=================================================
+7. 重要な設定情報
+=================================================
+
+7.1 テーブル構造の場所
+-------------------------------------------------
+- モデル定義: services/core-api/app/models.py
+- マイグレーション: services/core-api/alembic/versions/
+- スキーマ情報: このファイルがあれば再作成可能
+
+7.2 主要なテーブル一覧
+-------------------------------------------------
+ユーザー系:
+  - users: ユーザー基本情報
+  - gamification_profiles: ゲーミフィケーションプロフィール
+  - badges, user_badges: バッジシステム
+  - point_transactions: ポイント履歴
+  - line_integrations: LINE連携情報
+
+事業者系:
+  - stores: 店舗情報
+  - store_owners: 店舗オーナー
+  - products: 商品マスタ
+  - product_categories: 商品カテゴリ
+  - promotions: プロモーション情報
+  - events: イベント情報
+  - archive_contents: アーカイブコンテンツ
+
+取引系:
+  - receipts: レシート情報
+  - receipt_items: レシート明細
+  - rewards: 特典マスタ
+  - user_rewards: ユーザー取得特典
+
+気象データ系:
+  - weather_data: 天気データ
+  - historical_weather_data: 過去気象データ
+
+7.3 環境変数一覧
+-------------------------------------------------
+# Core API
+DATABASE_URL: PostgreSQL接続URL
+JWT_SECRET_KEY: JWT署名用秘密鍵
+JWT_ALGORITHM: HS256
+ACCESS_TOKEN_EXPIRE_MINUTES: 30
+PROJECT_ID: GCPプロジェクトID
+PROCESSOR_ID: Document AI Processor ID
+GCS_BUCKET_NAME: レシート保存用バケット名
+LINE_CHANNEL_SECRET: LINE Channel Secret
+LINE_CHANNEL_ACCESS_TOKEN: LINE Channel Access Token
+CORS_ORIGINS: 許可するオリジン（カンマ区切り）
+
+# OCR Processor
+PROJECT_ID: GCPプロジェクトID
+PROCESSOR_ID: Document AI Processor ID
+LOCATION: Processorのロケーション（us, eu等）
+
+# Frontend
+NEXT_PUBLIC_API_URL: バックエンドAPIのURL
+
+7.4 ポート番号
+-------------------------------------------------
+- Frontend: 3000
+- Core API: 8000
+- OCR Processor: 8001
+- PostgreSQL: 5432
+
+7.5 ディレクトリ構造
+-------------------------------------------------
+your-gcp-project-id/
+├── frontend/                 # Next.js フロントエンド
+│   ├── app/                 # Next.js App Router
+│   ├── components/          # Reactコンポーネント
+│   └── public/              # 静的ファイル
+├── services/
+│   ├── core-api/            # メインAPIサービス
+│   │   ├── app/
+│   │   │   ├── models.py   # ★データベースモデル定義
+│   │   │   ├── schemas.py  # Pydanticスキーマ
+│   │   │   ├── crud.py     # DB操作
+│   │   │   └── routers/    # APIエンドポイント
+│   │   └── alembic/         # ★DBマイグレーション
+│   └── ocr-processor/       # OCRサービス
+└── kubernetes/              # K8s設定ファイル
+    ├── base/
+    └── production/
+
+7.6 API エンドポイント一覧
+-------------------------------------------------
+認証:
+  POST /api/auth/register      # ユーザー登録
+  POST /api/auth/login         # ログイン
+  POST /api/auth/owner/register # 事業者登録
+  POST /api/auth/owner/login   # 事業者ログイン
+
+ユーザー:
+  GET  /api/users/me           # 自分の情報取得
+  PUT  /api/users/me           # 自分の情報更新
+
+レシート:
+  GET  /api/receipts           # レシート一覧
+  POST /api/receipts           # レシート登録
+  GET  /api/receipts/{id}      # レシート詳細
+
+ゲーミフィケーション:
+  GET  /api/gamification/profile    # プロフィール取得
+  GET  /api/gamification/badges     # バッジ一覧
+  GET  /api/gamification/transactions # ポイント履歴
+
+プロモーション:
+  GET  /api/promotions              # プロモーション一覧
+  POST /api/promotions              # プロモーション作成
+  PUT  /api/promotions/{id}         # プロモーション更新
+
+商品:
+  GET  /api/products                # 商品一覧
+  POST /api/products                # 商品登録
+
+店舗:
+  GET  /api/stores                  # 店舗一覧
+  POST /api/stores                  # 店舗登録
+
+天気:
+  GET  /api/weather/current         # 現在の天気
+  GET  /api/weather/forecast        # 天気予報
+  GET  /api/historical-weather      # 過去気象データ
+
+デバッグ:
+  GET  /api/debug/health            # ヘルスチェック
+  GET  /api/debug/db                # DB接続確認
+
+=================================================
+8. スケーリングとパフォーマンス最適化
+=================================================
+
+8.1 水平スケーリング
+-------------------------------------------------
+# Deploymentのレプリカ数を増やす
+kubectl scale deployment core-api --replicas=3
+kubectl scale deployment frontend --replicas=2
+
+# HPA (Horizontal Pod Autoscaler) の設定
+kubectl autoscale deployment core-api \
+  --cpu-percent=70 \
+  --min=2 \
+  --max=5
+
+8.2 データベース最適化
+-------------------------------------------------
+- インデックスの確認と作成
+- 接続プールの設定調整
+- Cloud SQLのインスタンスタイプアップグレード
+
+8.3 キャッシング
+-------------------------------------------------
+- Redisの導入検討
+- CloudCDNの活用
+
+=================================================
+9. セキュリティ考慮事項
+=================================================
+
+□ Secretsの管理
+  - Kubernetes Secretsを使用
+  - Google Secret Managerの検討
+
+□ ネットワークポリシー
+  - NetworkPolicyの設定
+  - Pod間通信の制限
+
+□ 認証・認可
+  - JWT トークンの有効期限設定
+  - パスワードポリシーの確認
+
+□ HTTPS/TLS
+  - IngressでのTLS終端
+  - Let's Encryptの証明書取得
+
+=================================================
+10. バックアップとリカバリ
+=================================================
+
+10.1 定期バックアップの設定
+-------------------------------------------------
+# Cloud SQLの自動バックアップ有効化
+gcloud sql instances patch e-zuka-postgres \
+  --backup-start-time=03:00
+
+# GCSバケットのバージョニング有効化
+gsutil versioning set on gs://$PROJECT_ID-receipts/
+
+10.2 リストア手順
+-------------------------------------------------
+# Cloud SQLのバックアップからリストア
+gcloud sql backups list --instance=e-zuka-postgres
+gcloud sql backups restore <BACKUP_ID> \
+  --backup-instance=e-zuka-postgres
+
+=================================================
+11. モニタリングとアラート
+=================================================
+
+11.1 ログの確認
+-------------------------------------------------
+# GCP Loggingでログを確認
+gcloud logging read "resource.type=k8s_container"
+
+11.2 メトリクスの監視
+-------------------------------------------------
+# Cloud Monitoringダッシュボード作成
+# - CPU使用率
+# - メモリ使用率
+# - リクエスト数
+# - エラー率
+# - レイテンシ
+
+=================================================
+12. コスト最適化
+=================================================
+
+□ 開発環境と本番環境の分離
+□ 使用していないリソースの削除
+□ Cloud SQLのインスタンスサイズの最適化
+□ GKEノードのプリエンプティブルVMの検討
+□ GCSのライフサイクルポリシー設定
+
+=================================================
+チェックリスト: サービス再開時
+=================================================
+
+事前準備:
+□ GCPプロジェクトの作成・設定
+□ 必要な認証情報の準備
+□ コードリポジトリのクローン
+
+GCPリソース:
+□ GKEクラスタの作成
+□ Cloud SQLインスタンスの作成
+□ Cloud Storageバケットの作成
+□ Document AI Processorの設定
+□ 必要なAPIの有効化
+
+データベース:
+□ スキーマの作成（models.pyから）
+□ 初期データの投入
+□ Kubernetes Secretsの作成
+
+アプリケーション:
+□ Dockerイメージのビルド
+□ GCRへのプッシュ
+□ ConfigMapの作成
+□ Deploymentのデプロイ
+□ Serviceのデプロイ
+□ Ingressの設定
+
+動作確認:
+□ Podの起動確認
+□ サービスの疎通確認
+□ データベース接続確認
+□ 外部アクセスの確認
+□ APIエンドポイントのテスト
+□ フロントエンドの動作確認
+
+本番環境設定:
+□ ドメインの設定
+□ TLS証明書の設定
+□ モニタリングの設定
+□ アラートの設定
+□ バックアップの設定
+
+=================================================
+参考資料とドキュメント
+=================================================
+
+- CLAUDE.md: 開発コマンドとアーキテクチャ概要
+- services/core-api/app/models.py: データベーススキーマ定義
+- kubernetes/: Kubernetes設定ファイル
+- 変更履歴ファイル: 2025-XX-XX-changes.txt
+
+=================================================
+サポート連絡先
+=================================================
+
+技術的な問題が発生した場合:
+1. このマニュアルのトラブルシューティングセクションを確認
+2. Podのログを確認
+3. GCPコンソールでリソースの状態を確認
+
+=================================================
+最後に
+=================================================
+
+このマニュアルに従えば、GKEクラスタ、Cloud SQL、Cloud Storageを
+削除した後でも、同じ構造のアプリケーションを再構築できます。
+
+重要なのは:
+1. コードリポジトリ（特にmodels.py）を保持すること
+2. 環境変数と認証情報を記録しておくこと
+3. GCPプロジェクトIDやProcessor IDなどの設定値を保存しておくこと
+
+データは失われますが、アプリケーションの構造と機能は
+完全に復元可能です。
+
+Good luck with the service recovery! 🚀

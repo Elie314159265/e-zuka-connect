@@ -14,5 +14,6 @@ data:
   DB_PORT: "5432"
 
   # Core API JWT Settings
+  # NOTE: These are example values. In production, use Kubernetes Secrets.
   JWT_SECRET_KEY: "your-secret-key-here-change-this-in-production"
   JWT_REFRESH_SECRET_KEY: "your-refresh-secret-key-here-change-this-in-production"
