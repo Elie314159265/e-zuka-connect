@@ -100,3 +100,19 @@ vulnerabilities.txt
 backup*.sql
 *.sql.gz
 *-backup-*.bundle
+
+# Root directory - ignore temporary files and scripts
+# (.txt development logs are now organized in docs/development-logs/)
+/*.txt
+/*.sql
+/*.py
+/*.jpg
+/*.png
+/*.gif
+/*.pdf
+/*.md
+!README.md
+!CLAUDE.md
+
+# Allow development logs in docs/
+!docs/**/*.txt
