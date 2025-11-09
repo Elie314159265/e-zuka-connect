@@ -92,7 +92,7 @@ CHANGELOG.local.md
 *~
 
 # Claude Code Settings
-.claude/settings.local.json
+.claude/
 
 # Security and Sensitive Files
 *-security.txt
