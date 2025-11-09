@@ -1,10 +1,10 @@
-# E-Zuka Connect
+# e-ZUKA Connect
 
 データ駆動型イベント・店舗支援プラットフォーム - 福岡県飯塚市の商店街活性化プロジェクト
 
 ## 概要について
 
-E-Zuka Connectは、福岡県飯塚市の商店街活性化を目指すWebアプリケーションです。レシートOCRによるデータ収集、気象データとの相関分析、AI経営アドバイスなど、データに基づいた販促支援を提供します。
+e-ZUKA Connectは、福岡県飯塚市の商店街活性化を目指すWebアプリケーションです。レシートOCRによるデータ収集、気象データとの相関分析、AI経営アドバイスなど、データに基づいた販促支援を提供します。
 
 ### 主要機能
 
@@ -21,7 +21,7 @@ E-Zuka Connectは、福岡県飯塚市の商店街活性化を目指すWebアプ
 - TypeScript
 - Tailwind CSS
 - Framer Motion
-- Zustand (状態管理)
+- Zustand
 
 ### Backend
 - FastAPI (Python)
@@ -45,7 +45,7 @@ E-Zuka Connectは、福岡県飯塚市の商店街活性化を目指すWebアプ
 
 - Node.js 18以上
 - Python 3.11以上
-- Docker & Docker Compose
+- Docker
 - Google Cloud Platform アカウント
 - PostgreSQL 13以上
 
@@ -208,11 +208,8 @@ kubectl create secret generic gcp-ocr-credentials-secret \
 ### 3. デプロイ
 
 ```bash
-# デプロイスクリプトを使用
-./scripts/deploy.sh
-
-# または直接kubectl apply
-kubectl apply -k kubernetes/base/
+# kubectl applyでリソースデプロイ
+kubectl apply -f kubernetes/base/
 ```
 
 ## API ドキュメント
@@ -245,20 +242,20 @@ e-zuka-connect/
 │   ├── base/              # 基本設定
 │   └── overlays/          # 環境別設定
 ├── docs/                  # プロジェクトドキュメント
-└── scripts/               # デプロイスクリプト等
+
 ```
 
 ## セキュリティと機密情報について
 
 ### 重要: 機密情報の取り扱い
 
-このリポジトリは公開用リポジトリです。以下の機密情報は絶対にコミット・プッシュしないでください：
+このリポジトリは公開用リポジトリです。以下の機密情報はにコミット・プッシュしないでください：
 
 **公開厳禁の機密ファイル例**:
 - `.env`, `.env.local` などの環境変数ファイル
 - GCP サービスアカウント鍵 (`.json`)
 - データベースダンプ (`.sql`)
-- Kubernetes Secrets (`.yaml`)
+- Kubernetes Secrets (`.yaml`)←又は暗号化してください
 
 ### ローカル設定ファイルについて
 
@@ -266,14 +263,15 @@ e-zuka-connect/
 
 **本番環境では必ず環境変数経由で設定を行ってください。**
 
-## ライセンス
+## このプロジェクトについて
 
-This project is for portfolio purposes.
+- This project is for portfolio purposes.
+- このプロジェクトはe-ZUKAスマートアプリコンテスト2025で企業賞を3社から受賞
+
 
 ## 開発者・貢献者
 
-- Claude Code (AI Assistant)
-- [Your Name]
+- Elie
 
 ## サポート・お問い合わせ
 
