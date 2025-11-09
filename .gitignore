@@ -35,6 +35,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+*.old
 
 # Python
 __pycache__/
@@ -90,6 +91,10 @@ CHANGELOG.local.md
 *.bak
 *.swp
 *~
+
+# Test data
+test_data.json
+**/test_data.json
 
 # Claude Code Settings
 .claude/
